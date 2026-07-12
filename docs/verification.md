@@ -79,4 +79,4 @@ Pre-publication result after the final review fix:
 - Relocation fixture: a custom `docs/sessions/` install still resolved and returned valid pointer JSON after the target repo moved to a different absolute path containing spaces.
 - Structured code review: installer command injection/path escape and portability findings fixed; CI now repeats shellcheck, tracked-journal guarding, bats, and full-history gitleaks.
 
-The public CI URL is added after publishing completes.
+Hosted CI is green on Ubuntu, macOS, and the full-history gitleaks job: [run 29213884686](https://github.com/dctmfoo/session-journal/actions/runs/29213884686).
