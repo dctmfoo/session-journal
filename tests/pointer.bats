@@ -13,9 +13,9 @@ teardown() { teardown_workspace; }
 }
 
 @test "newest journal is selected and status plus complete next step are extracted" {
-  older="$(write_journal 2026-01-02-0304-older.md none 'DONE — old')"
+  older="$(write_journal 2026-01-02-0304-older.md none 'DONE - old')"
   sleep 1
-  newer="$(write_journal 2026-01-02-0305-newer.md docs/plans/work.md 'ACTIVE — new')"
+  newer="$(write_journal 2026-01-02-0305-newer.md docs/plans/work.md 'ACTIVE - new')"
   touch "$older" "$newer"
   touch -t 202001010000 "$older"
 
@@ -23,7 +23,7 @@ teardown() { teardown_workspace; }
   [ "$status" -eq 0 ]
   printf '%s' "$output" | jq -e . >/dev/null
   [[ "$output" == *"2026-01-02-0305-newer.md"* ]]
-  [[ "$output" == *"ACTIVE — new"* ]]
+  [[ "$output" == *"ACTIVE - new"* ]]
   [[ "$output" == *"Run the next focused test."* ]]
   [[ "$output" == *'Preserve quoted text: \"ready\".'* ]]
 }
