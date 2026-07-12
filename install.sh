@@ -132,7 +132,8 @@ mkdir -p "$TARGET/.claude/hooks" "$TARGET/$SESSIONS_REL"
 cp "$SOURCE/hooks/session-journal-pointer.sh" "$TARGET/.claude/hooks/session-journal-pointer.sh"
 cp "$SOURCE/hooks/session-journal-nudge.sh" "$TARGET/.claude/hooks/session-journal-nudge.sh"
 chmod +x "$TARGET/.claude/hooks/session-journal-pointer.sh" "$TARGET/.claude/hooks/session-journal-nudge.sh"
-sed "s|{{SESSIONS_DIR}}|$SESSIONS_REL|g; s|{{DEFAULT_PLAN_POINTER}}|none|g; s|{{TIMEZONE}}|machine-local timezone|g; s|{{EVIDENCE_VOCABULARY}}|commit hashes, test names, issue IDs, and document section references|g" \
+TIMEZONE=$(date +%Z 2>/dev/null || printf '%s' local)
+sed "s|{{SESSIONS_DIR}}|$SESSIONS_REL|g; s|{{DEFAULT_PLAN_POINTER}}|none|g; s|{{TIMEZONE}}|$TIMEZONE|g; s|{{EVIDENCE_VOCABULARY}}|commit hashes, test names, issue IDs, and document section references|g" \
   "$SOURCE/templates/sessions-README.md" > "$TARGET/$SESSIONS_REL/README.md"
 
 ENV_PREFIX=""

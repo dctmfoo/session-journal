@@ -43,7 +43,7 @@ Run from a clone; the installer does not fetch code:
 
 Options are `--sessions-dir <relative-path>`, `--codex`, `--no-claude`, and `--uninstall`. `jq` is required because settings are merged structurally. Invalid JSON or JSON5 is refused rather than rewritten.
 
-Codex project hooks load only for trusted projects. After installation, open `/hooks` in Codex and review the new definitions; changed definitions require review again. Current Codex supports both `SessionStart` and turn-scoped `Stop`, so the same pointer, freshness nudge, and secrets guard can run in Codex. The AGENTS.md block keeps a manual fallback for hosts where hooks are disabled or unavailable.
+Codex project hooks load only for trusted projects. After installation, open `/hooks` in Codex and review the new definitions; changed definitions require review again. Codex CLI 0.144.1 was verified with both `SessionStart` and turn-scoped `Stop`, so the same pointer, freshness nudge, and secrets guard run in Codex. The AGENTS.md block keeps a manual fallback for older or disabled hook surfaces.
 
 ## The journal in one glance
 

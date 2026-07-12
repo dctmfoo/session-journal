@@ -16,9 +16,11 @@ Inspect and record for your final report:
 2. Instruction files: CLAUDE.md, AGENTS.md, both, or neither. Inventory existing hooks and plan a merge; never replace a hooks array.
 3. Documentation topology: plans, specifications, ADRs, runbooks, or an issue tracker. Use the strongest active artifact as the default THIN pointer. With no docs culture, default to DETAILED and `none`.
 4. Journal location: default to root `sessions/`; prefer `docs/sessions/` when the repository consistently keeps process docs under `docs/` or tightly controls published root files. A monorepo normally gets one workspace-root journal directory because a journal follows the human session, not a package.
-5. Timezone: discover the machine-local zone label. Never hardcode a city or offset from this upstream repository.
+5. Timezone: run `date +%Z` in the target repository and use that machine-local zone label. Do not use `date -u`, `UTC` by convention, or a zone inherited from this upstream repository.
 6. Repository vocabulary: add branch lines for multi-repository work and name relevant issue, gate, ADR, or test identifiers in the local evidence guidance.
 7. Ignore rules: journals are intended to be committed. Warn if an existing rule ignores the chosen directory, then ask Question 2 only if intent remains unclear.
+
+Before writing, ask Question 3 unless the user's request already says whether to install the optional spine-promotion module. Do not infer opt-in or opt-out from repository shape.
 
 ## Phase B — install and adapt
 

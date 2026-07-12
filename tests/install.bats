@@ -18,6 +18,7 @@ teardown() { teardown_workspace; }
   jq -e '.hooks.SessionStart | length == 1' "$TARGET/.claude/settings.json" >/dev/null
   [ -f "$TARGET/sessions/README.md" ]
   [ -f "$TARGET/CLAUDE.md" ]
+  ! grep -q 'machine-local timezone' "$TARGET/sessions/README.md"
 }
 
 @test "rerun is idempotent" {
