@@ -1,0 +1,58 @@
+# Agent Adoption Contract
+
+You are installing the Session Journal discipline into a target repository. Adapt it to the repository you actually find. Preserve existing configuration and prove the result before finishing.
+
+Ask at most three questions, and only when discovery cannot answer them:
+
+1. Which journal directory should be used, if both root `sessions/` and `docs/sessions/` are equally plausible?
+2. Should journals be committed (the default) or ignored locally?
+3. Should the optional spine-promotion nudge be installed?
+
+## Phase A — survey without writing
+
+Inspect and record for your final report:
+
+1. Agent runtimes: `.claude/settings.json`, `.codex/config.toml`, `.codex/hooks.json`, and instruction-only runtimes such as Cursor or Copilot. Treat user-level configuration as a clue, never as permission to modify global files.
+2. Instruction files: CLAUDE.md, AGENTS.md, both, or neither. Inventory existing hooks and plan a merge; never replace a hooks array.
+3. Documentation topology: plans, specifications, ADRs, runbooks, or an issue tracker. Use the strongest active artifact as the default THIN pointer. With no docs culture, default to DETAILED and `none`.
+4. Journal location: default to root `sessions/`; prefer `docs/sessions/` when the repository consistently keeps process docs under `docs/` or tightly controls published root files. A monorepo normally gets one workspace-root journal directory because a journal follows the human session, not a package.
+5. Timezone: discover the machine-local zone label. Never hardcode a city or offset from this upstream repository.
+6. Repository vocabulary: add branch lines for multi-repository work and name relevant issue, gate, ADR, or test identifiers in the local evidence guidance.
+7. Ignore rules: journals are intended to be committed. Warn if an existing rule ignores the chosen directory, then ask Question 2 only if intent remains unclear.
+
+## Phase B — install and adapt
+
+1. Put one real copy of both scripts in `.claude/hooks/` or a shared `scripts/agent-hooks/` directory. Set executable bits. Codex may reference the same scripts; use real duplicate files instead of symlinks on Windows.
+2. Merge `SessionStart` and `Stop` command entries into `.claude/settings.json`. Preserve every existing group and handler. If Codex is used, merge the equivalent entries into `.codex/hooks.json`, resolving scripts from `$(git rev-parse --show-toplevel)` so subdirectory starts work. Project-local Codex hooks require a trusted project and hook review through `/hooks`.
+3. Create the selected journal directory and an adapted README from `templates/sessions-README.md`. Fill in its actual directory, THIN default, timezone label, and evidence vocabulary.
+4. Merge the appropriate sentinel-delimited discipline block into CLAUDE.md and AGENTS.md. Create AGENTS.md when Codex is used and it is missing. Keep the twin-sync sentence only when both instruction files exist. Instruction-only runtimes need the manual end-of-turn check.
+5. Set `SESSION_JOURNAL_DIR` in hook commands only for a non-default location. Set `JOURNAL_FRESH_SECS` only when the repository needs a non-default freshness window.
+
+Never delete or rewrite an existing user hook. Never commit unless the user asked or repository conventions already authorize it. Never put a real or realistic credential in a demonstration journal. If a settings file contains comments or JSON5, do not normalize or overwrite it: show the matching snippet and ask the user to merge it manually.
+
+## Phase C — verify before finishing
+
+Run and report this matrix:
+
+| Check | Expected proof |
+| --- | --- |
+| Static scripts | `bash -n` succeeds; both scripts are executable |
+| Settings | `jq .` succeeds for each modified JSON file; pre-existing hooks remain |
+| Empty pointer | Direct SessionStart run returns valid JSON with a create instruction |
+| Populated pointer | A synthetic journal yields its relative path, Status, and complete next step |
+| Fresh Stop | Fresh journal plus `{"stop_hook_active":false}` exits 0 |
+| Stale Stop | Old THIN and DETAILED fixtures exit 2 with mode-correct guidance |
+| Loop protection | `{"stop_hook_active":true}` skips freshness and exits 0 |
+| Secrets guard | Construct a synthetic credential assignment at runtime; Stop exits 2 without echoing the value |
+
+Delete verification fixtures. Then write the first real journal about this adoption session, with no secrets, and run the pointer once more so the install demonstrates itself.
+
+For Codex, trust the project, review the changed hooks with `/hooks`, and verify behavior with the installed Codex version. For Claude Code, run a small headless task if available. If a runtime cannot be exercised, say so and retain the manual fallback wording; never claim an unobserved hook fired.
+
+## Phase D — document reversal
+
+Uninstalling removes the two owned hook groups, the two installed scripts, and the sentinel-delimited instruction blocks. Keep the journal directory by default because it is project history. The deterministic installer performs this with `./install.sh <repo> --uninstall` using the same runtime flags used for installation.
+
+## Final report
+
+Report the survey decisions, changed files, exact verification matrix, any runtime limitation, first-journal path, and uninstall command. Mention any question that used the three-question budget.

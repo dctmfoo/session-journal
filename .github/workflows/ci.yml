@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: bats-core/bats-action@3.0.1
+      - name: Validate shell syntax
+        run: |
+          bash -n hooks/session-journal-pointer.sh
+          bash -n hooks/session-journal-nudge.sh
+          bash -n extras/spine-promotion/journal-spine-promotion-nudge.sh
+          bash -n install.sh
+      - name: Run bats suites
+        run: bats tests
