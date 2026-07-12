@@ -32,7 +32,7 @@ while [ "$#" -gt 0 ]; do
 done
 
 case "$SESSIONS_REL" in
-  /*|../*|*/../*|*'/..')
+  ""|.|..|/*|./*|../*|*/./*|*/../*|*/.|*/..|*[!A-Za-z0-9._/-]*)
     echo "--sessions-dir must be a path inside the target repository" >&2
     exit 64
     ;;
@@ -85,6 +85,13 @@ remove_hooks() {
 
 strip_owned_block() {
   local destination=$1
+  local begins ends
+  begins=$(grep -c '<!-- session-journal:begin -->' "$destination" 2>/dev/null || true)
+  ends=$(grep -c '<!-- session-journal:end -->' "$destination" 2>/dev/null || true)
+  if [ "$begins" -ne "$ends" ]; then
+    echo "$destination has an unmatched session-journal sentinel; refusing to modify it." >&2
+    return 65
+  fi
   awk '
     /<!-- session-journal:begin -->/ { skipping=1; next }
     /<!-- session-journal:end -->/ { skipping=0; next }
@@ -139,10 +146,11 @@ TIMEZONE=$(date +%Z 2>/dev/null || printf '%s' local)
 sed "s|{{SESSIONS_DIR}}|$SESSIONS_REL|g; s|{{DEFAULT_PLAN_POINTER}}|none|g; s|{{TIMEZONE}}|$TIMEZONE|g; s|{{EVIDENCE_VOCABULARY}}|commit hashes, test names, issue IDs, and document section references|g" \
   "$SOURCE/templates/sessions-README.md" > "$TARGET/$SESSIONS_REL/README.md"
 
+RUNTIME_ROOT="\$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 ENV_PREFIX=""
-[ "$SESSIONS_REL" = "sessions" ] || ENV_PREFIX="SESSION_JOURNAL_DIR=\"$TARGET/$SESSIONS_REL\" "
-POINTER_COMMAND="${ENV_PREFIX}\"\$(git rev-parse --show-toplevel)/.claude/hooks/session-journal-pointer.sh\""
-NUDGE_COMMAND="${ENV_PREFIX}\"\$(git rev-parse --show-toplevel)/.claude/hooks/session-journal-nudge.sh\""
+[ "$SESSIONS_REL" = "sessions" ] || ENV_PREFIX="SESSION_JOURNAL_DIR=\"$RUNTIME_ROOT/$SESSIONS_REL\" "
+POINTER_COMMAND="${ENV_PREFIX}\"$RUNTIME_ROOT/.claude/hooks/session-journal-pointer.sh\""
+NUDGE_COMMAND="${ENV_PREFIX}\"$RUNTIME_ROOT/.claude/hooks/session-journal-nudge.sh\""
 
 if [ "$INSTALL_CLAUDE" = true ]; then
   merge_hooks "$CLAUDE_SETTINGS" claude "$POINTER_COMMAND" "$NUDGE_COMMAND"

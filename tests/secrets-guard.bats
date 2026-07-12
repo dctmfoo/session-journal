@@ -19,10 +19,19 @@ assert_secret_blocks() {
 @test "credential assignment triggers" { assert_secret_blocks 'password = hunter2secret'; }
 @test "passphrase assignment triggers" { assert_secret_blocks 'passphrase: correct-horse-battery'; }
 @test "long hex triggers" { assert_secret_blocks '0123456789abcdef0123456789abcdef01234567'; }
+@test "uppercase credential assignment triggers" { assert_secret_blocks 'PASSWORD = synthetic-secret-value'; }
+@test "provider-shaped token triggers" { assert_secret_blocks 'AKIAIOSFODNN7EXAMPLE'; }
 
 @test "truncated ids and key names alone do not trigger" {
   journal="$(write_journal)"
   printf '%s\n' '6750bd6e…' 'password' 'api_key:' >> "$journal"
+  run bash -c "printf '%s' '{\"stop_hook_active\":false}' | '$BATS_TEST_DIRNAME/../hooks/session-journal-nudge.sh'"
+  [ "$status" -eq 0 ]
+}
+
+@test "a verified full commit hash can use the line-scoped allowlist" {
+  journal="$(write_journal)"
+  printf '%s\n' '0123456789abcdef0123456789abcdef01234567 <!-- journal-secrets-ok -->' >> "$journal"
   run bash -c "printf '%s' '{\"stop_hook_active\":false}' | '$BATS_TEST_DIRNAME/../hooks/session-journal-nudge.sh'"
   [ "$status" -eq 0 ]
 }

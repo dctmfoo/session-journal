@@ -15,7 +15,8 @@ case "$SESSIONS_DIR" in
 esac
 FRESH_SECS="${JOURNAL_FRESH_SECS:-300}"
 
-INPUT=$(cat 2>/dev/null || true)
+INPUT=""
+IFS= read -r -t 2 INPUT 2>/dev/null || true
 STOP_ACTIVE=false
 if [ -n "$INPUT" ]; then
   if command -v python3 >/dev/null 2>&1; then
@@ -24,15 +25,17 @@ try: print("true" if json.load(sys.stdin).get("stop_hook_active") is True else "
 except Exception: print("false")' 2>/dev/null || printf false)
   elif command -v jq >/dev/null 2>&1; then
     STOP_ACTIVE=$(printf '%s' "$INPUT" | jq -r 'if .stop_hook_active == true then "true" else "false" end' 2>/dev/null || printf false)
+  elif printf '%s' "$INPUT" | grep -Eq '"stop_hook_active"[[:space:]]*:[[:space:]]*true'; then
+    STOP_ACTIVE=true
   fi
 fi
 
 MARKER=""
 if [ -z "$INPUT" ]; then
   PROJECT_KEY=$(printf '%s' "$PROJECT_DIR" | cksum | awk '{print $1}')
-  MARKER="${TMPDIR:-/tmp}/session-journal-nudge-$PROJECT_KEY"
-  if [ -e "$MARKER" ]; then
-    rm -f "$MARKER"
+  MARKER="${TMPDIR:-/tmp}/session-journal-nudge-$PROJECT_KEY.d"
+  if [ -d "$MARKER" ]; then
+    rmdir "$MARKER" 2>/dev/null || true
     STOP_ACTIVE=true
   fi
 fi
@@ -51,7 +54,7 @@ done
 # echoed back: diagnostics identify line numbers so a hook cannot leak a secret.
 if [ -n "$LATEST" ]; then
   LEAK_LINES=$(grep -nEv '<!-- journal-secrets-ok -->' "$LATEST" 2>/dev/null \
-    | grep -E 'e[y]J[A-Za-z0-9_-]{20,}|Bearer[[:space:]]+[A-Za-z0-9._-]{16,}|(client[_-]?secret|api[_-]?key|password|passphrase|token)[[:space:]]*[:=][[:space:]]*[^[:space:]]{6,}|[0-9a-fA-F]{40,}' \
+    | grep -Ei 'e[y]J[A-Za-z0-9_-]{20,}|Bearer[[:space:]]+[A-Za-z0-9._-]{16,}|(client[_-]?secret|api[_-]?key|password|passphrase|token)[[:space:]]*[:=][[:space:]]*[^[:space:]]{6,}|[0-9a-f]{40,}|AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{16,}|-----BEGIN ([A-Z0-9 ]+ )?PRIVATE KEY-----' \
     | cut -d: -f1 | head -n 3 | paste -sd, - || true)
   if [ -n "$LEAK_LINES" ]; then
     echo "SESSION-JOURNAL-SECRETS-GUARD: secret-looking content found in $LATEST at line(s) $LEAK_LINES. Redact values to key names or safe length-only descriptions before finishing." >&2
@@ -65,7 +68,7 @@ if [ "$STOP_ACTIVE" = "true" ]; then
 fi
 
 block_once() {
-  [ -n "$MARKER" ] && : > "$MARKER"
+  [ -z "$MARKER" ] || mkdir "$MARKER" 2>/dev/null || true
   echo "$1" >&2
   exit 2
 }

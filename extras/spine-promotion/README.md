@@ -7,4 +7,4 @@ Configuration:
 - `SPINE_PROMOTION_THRESHOLD` — milestone count, default `6`.
 - `SPINE_PROMOTION_TARGET_HINT` — suggested durable-doc directory, default `docs/plans/`.
 
-Merge it as an additional Stop handler; do not replace the freshness and secrets hook. A repository can also build a reverse index from file paths to journals for a local documentation site, but that site-specific index is intentionally outside this portable module.
+Merge it as an additional Stop handler; do not replace the freshness and secrets hook. This optional entry is manually managed: remove its hook entry and installed script manually when uninstalling it, because the core installer owns only the pointer and freshness/secrets hooks. A repository can also build a reverse index from file paths to journals for a local documentation site, but that site-specific index is intentionally outside this portable module.

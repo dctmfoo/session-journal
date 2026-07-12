@@ -22,5 +22,19 @@ jobs:
           bash -n hooks/session-journal-nudge.sh
           bash -n extras/spine-promotion/journal-spine-promotion-nudge.sh
           bash -n install.sh
+      - name: Run shellcheck
+        run: shellcheck hooks/*.sh extras/spine-promotion/*.sh install.sh
       - name: Run bats suites
         run: bats tests
+      - name: Check tracked journals with the runtime secrets guard
+        run: printf '%s' '{"stop_hook_active":false}' | JOURNAL_FRESH_SECS=999999999 hooks/session-journal-nudge.sh
+
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -24,11 +24,12 @@ Before writing, ask Question 3 unless the user's request already says whether to
 
 ## Phase B — install and adapt
 
-1. Put one real copy of both scripts in `.claude/hooks/` or a shared `scripts/agent-hooks/` directory. Set executable bits. Codex may reference the same scripts; use real duplicate files instead of symlinks on Windows.
-2. Merge `SessionStart` and `Stop` command entries into `.claude/settings.json`. Preserve every existing group and handler. If Codex is used, merge the equivalent entries into `.codex/hooks.json`, resolving scripts from `$(git rev-parse --show-toplevel)` so subdirectory starts work. Project-local Codex hooks require a trusted project and hook review through `/hooks`.
-3. Create the selected journal directory and an adapted README from `templates/sessions-README.md`. Fill in its actual directory, THIN default, timezone label, and evidence vocabulary.
-4. Merge the appropriate sentinel-delimited discipline block into CLAUDE.md and AGENTS.md. Create AGENTS.md when Codex is used and it is missing. Keep the twin-sync sentence only when both instruction files exist. Instruction-only runtimes need the manual end-of-turn check.
-5. Set `SESSION_JOURNAL_DIR` in hook commands only for a non-default location. Set `JOURNAL_FRESH_SECS` only when the repository needs a non-default freshness window.
+1. Prefer the tested installer instead of rebuilding its merge logic. Clone or download this repository to a temporary location, then run `./install.sh <target>` with the discovered `--sessions-dir`, `--codex`, and/or `--no-claude` flags. If the installer cannot run, perform the equivalent steps below manually and explain why in the final report.
+2. The installer puts one real copy of both scripts in `.claude/hooks/`, merges `SessionStart` and `Stop` without replacing existing groups, and uses runtime-relative commands so subdirectory starts and relocated clones work. Project-local Codex hooks require a trusted project and hook review through `/hooks`.
+3. Adapt the generated sessions README with the strongest THIN default, the `date +%Z` result, and repository-specific evidence vocabulary. Keep the generated directory accurate.
+4. Adapt the sentinel-delimited blocks in CLAUDE.md and AGENTS.md. Keep the twin-sync sentence only when both instruction files exist. Instruction-only runtimes need the manual end-of-turn check.
+5. Set `JOURNAL_FRESH_SECS` in the generated hook commands only when the repository needs a non-default freshness window. The core installer does not manage this optional override.
+6. If Question 3 opted into spine promotion, merge `extras/spine-promotion/journal-spine-promotion-nudge.sh` as an additional Stop handler and test it. This optional handler is manually managed and must also be removed manually; the core installer intentionally owns only its pointer and freshness/secrets hooks.
 
 Never delete or rewrite an existing user hook. Never commit unless the user asked or repository conventions already authorize it. Never put a real or realistic credential in a demonstration journal. If a settings file contains comments or JSON5, do not normalize or overwrite it: show the matching snippet and ask the user to merge it manually.
 

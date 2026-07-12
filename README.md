@@ -61,13 +61,13 @@ The pointer makes this THIN mode: details stay in the release plan. With `none`,
 
 ## Safety model
 
-Journals are committed by default, so secret handling is deliberately strict. The Stop hook scans only the newest journal for JWT-like values, bearer values, credential assignments, and long hexadecimal strings. It reports line numbers, never matched values. A verified false-positive line can carry `<!-- journal-secrets-ok -->`; that escape applies only to that line.
+Journals are committed by default, so secret handling is deliberately strict. The Stop hook scans only the newest journal for JWT-like values, bearer values, credential assignments, common provider-token shapes, private-key headers, and long hexadecimal strings. It reports line numbers, never matched values. Use abbreviated commit hashes in journals; if a full hash is required, a verified false-positive line can carry `<!-- journal-secrets-ok -->`. That escape applies only to that line.
 
 This is a continuity aid, not a credential scanner for the whole repository. Keep your normal secret-scanning and review gates.
 
 ## Optional spine promotion
 
-Long-running DETAILED journals often mean a durable plan is missing. The optional module under `extras/spine-promotion/` nudges after a configurable milestone count, then asks the agent to promote recurring work into a plan or specification and switch back to THIN.
+Long-running DETAILED journals often mean a durable plan is missing. The optional module under `extras/spine-promotion/` nudges after a configurable milestone count, then asks the agent to promote recurring work into a plan or specification and switch back to THIN. It is an intentionally manual add-on: the core installer and uninstaller do not manage its Stop entry.
 
 ## Uninstall
 
