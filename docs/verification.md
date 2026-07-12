@@ -8,11 +8,12 @@ Verified 2026-07-13 on macOS. This document records observed behavior, not just 
 | --- | --- |
 | Shell syntax | `bash -n` passed for the installer, both core hooks, and the optional spine-promotion hook |
 | JSON syntax | Both hook snippets parsed with `jq` |
-| bats-core 1.13.0 | 25/25 checks passed |
-| Installer lifecycle | Fresh install, merge preservation, idempotent rerun, custom journal path, Codex wiring, and uninstall passed |
-| Secrets behavior | Four pattern classes, safe negatives, one-line allowlist, and guard-under-loop-protection passed |
+| bats-core 1.13.0 | 38/38 checks passed |
+| Installer lifecycle | Fresh install, merge preservation, idempotent rerun, portable custom journal path, Codex-only wiring, invalid-input refusal, and repeatable uninstall passed |
+| Secrets behavior | Credential and provider pattern classes, safe negatives, one-line allowlist, and guard-under-loop-protection passed |
+| Optional spine promotion | Empty, THIN, below-threshold, threshold, and configured-override cases passed |
 
-The first proof-first run intentionally had 25 failures because the hooks and installer did not exist yet. The same suites passed after implementation.
+The first proof-first run intentionally had 25 failures because the hooks and installer did not exist yet. The suite grew to 38 checks during review; all pass after implementation and hardening.
 
 ## Live Claude Code
 
@@ -67,13 +68,15 @@ gitleaks detect --source . --log-opts="--all" --redact
 
 Also run the project-specific trace grep and manually read every tracked file.
 
-Pre-publication result:
+Pre-publication result after the final review fix:
 
 - Uncommitted-tree scan: clean.
-- Full-history scan across two pre-publication commits: clean.
+- Full-history scan across all pre-publication commits: clean.
 - Customer and personal-trace grep: zero matches.
-- Manual review: all 27 tracked files read; examples are synthetic and no private source file was copied.
-- Shellcheck: clean after one redirect-style simplification.
-- bats-core: 25/25 passing after the final installer change.
+- Manual review: all 28 tracked files read; examples are synthetic and no private source file was copied.
+- Shellcheck and `bash -n`: clean for every shell entrypoint.
+- bats-core: 38/38 passing, including review regressions for path traversal, portable relocation, malformed JSON, sentinel integrity, repeatable uninstall, and spine promotion.
+- Relocation fixture: a custom `docs/sessions/` install still resolved and returned valid pointer JSON after the target repo moved to a different absolute path containing spaces.
+- Structured code review: installer command injection/path escape and portability findings fixed; CI now repeats shellcheck, tracked-journal guarding, bats, and full-history gitleaks.
 
 The public CI URL is added after publishing completes.
