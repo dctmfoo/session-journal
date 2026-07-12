@@ -83,16 +83,21 @@ remove_hooks() {
   mv "$tmp" "$file"
 }
 
+strip_owned_block() {
+  local destination=$1
+  awk '
+    /<!-- session-journal:begin -->/ { skipping=1; next }
+    /<!-- session-journal:end -->/ { skipping=0; next }
+    !skipping { print }
+  ' "$destination"
+}
+
 replace_owned_block() {
   local destination=$1
   local template=$2
   local tmp="$destination.session-journal.tmp"
   [ -e "$destination" ] || : > "$destination"
-  awk '
-    /<!-- session-journal:begin -->/ { skipping=1; next }
-    /<!-- session-journal:end -->/ { skipping=0; next }
-    !skipping { print }
-  ' "$destination" > "$tmp"
+  strip_owned_block "$destination" > "$tmp"
   while [ -s "$tmp" ] && [ "$(tail -c 1 "$tmp" | wc -l | tr -d ' ')" -eq 0 ]; do printf '\n' >> "$tmp"; break; done
   {
     printf '%s\n' '<!-- session-journal:begin -->'
@@ -106,11 +111,7 @@ remove_owned_block() {
   local destination=$1
   [ -e "$destination" ] || return 0
   local tmp="$destination.session-journal.tmp"
-  awk '
-    /<!-- session-journal:begin -->/ { skipping=1; next }
-    /<!-- session-journal:end -->/ { skipping=0; next }
-    !skipping { print }
-  ' "$destination" > "$tmp"
+  strip_owned_block "$destination" > "$tmp"
   mv "$tmp" "$destination"
 }
 

@@ -74,9 +74,7 @@ if [ -z "$LATEST" ]; then
   block_once "SESSION-JOURNAL-REMINDER: No session journal exists. Create YYYY-MM-DD-HHMM-<slug>.md from the local template before finishing resumable work."
 fi
 
-if stat -f %m "$LATEST" >/dev/null 2>&1; then
-  MTIME=$(stat -f %m "$LATEST")
-else
+if ! MTIME=$(stat -f %m "$LATEST" 2>/dev/null); then
   MTIME=$(stat -c %Y "$LATEST")
 fi
 NOW=$(date +%s)
