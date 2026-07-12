@@ -65,4 +65,15 @@ gitleaks detect --source . --no-git --redact
 gitleaks detect --source . --log-opts="--all" --redact
 ```
 
-Also run the project-specific trace grep and manually read every tracked file. The final gate results and public CI URL are added below when publishing completes.
+Also run the project-specific trace grep and manually read every tracked file.
+
+Pre-publication result:
+
+- Uncommitted-tree scan: clean.
+- Full-history scan across two pre-publication commits: clean.
+- Customer and personal-trace grep: zero matches.
+- Manual review: all 27 tracked files read; examples are synthetic and no private source file was copied.
+- Shellcheck: clean after one redirect-style simplification.
+- bats-core: 25/25 passing after the final installer change.
+
+The public CI URL is added after publishing completes.

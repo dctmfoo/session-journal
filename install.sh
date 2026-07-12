@@ -94,9 +94,11 @@ replace_owned_block() {
     !skipping { print }
   ' "$destination" > "$tmp"
   while [ -s "$tmp" ] && [ "$(tail -c 1 "$tmp" | wc -l | tr -d ' ')" -eq 0 ]; do printf '\n' >> "$tmp"; break; done
-  printf '%s\n' '<!-- session-journal:begin -->' >> "$tmp"
-  sed "s|{{SESSIONS_DIR}}|$SESSIONS_REL|g" "$template" >> "$tmp"
-  printf '%s\n' '<!-- session-journal:end -->' >> "$tmp"
+  {
+    printf '%s\n' '<!-- session-journal:begin -->'
+    sed "s|{{SESSIONS_DIR}}|$SESSIONS_REL|g" "$template"
+    printf '%s\n' '<!-- session-journal:end -->'
+  } >> "$tmp"
   mv "$tmp" "$destination"
 }
 

@@ -1,6 +1,6 @@
 # Session: build the public session-journal repository
 
-**Started:** 2026-07-13 12:00 IST
+**Started:** 2026-07-13 04:11 IST
 **Last updated:** 2026-07-13 04:46 IST
 **Status:** ACTIVE — implementation and live verification complete; publication gates next
 
@@ -11,8 +11,8 @@ Build, verify, and publish the standalone session-journal project end to end fro
 docs/verification.md
 
 ## Milestones
-- 2026-07-13 12:00 — initialized a fresh repository with no imported history.
-- 2026-07-13 12:00 — recorded a 25-check failing bats baseline before implementing hooks and installer.
+- 2026-07-13 04:11 — initialized a fresh repository with no imported history.
+- 2026-07-13 04:13 — recorded a 25-check failing bats baseline before implementing hooks and installer.
 - 2026-07-13 04:18 — committed the green 25-check implementation baseline as `34b96e6`.
 - 2026-07-13 04:40 — verified real SessionStart and Stop behavior in Claude Code 2.1.207 and Codex CLI 0.144.1.
 - 2026-07-13 04:45 — completed three context-free adoption fixtures and tightened the discovered timezone ambiguity.
@@ -44,5 +44,5 @@ Run the final trace and full-history secret gates, manually inspect every tracke
 - none
 
 ## Change log
-- 2026-07-13 12:00 — journal created with proof-first evidence.
+- 2026-07-13 04:11 — journal created with proof-first evidence.
 - 2026-07-13 04:46 — recorded current-runtime and adoption evidence before publication gates.
