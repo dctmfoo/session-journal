@@ -53,9 +53,29 @@ done
 # The allowlist applies only to the line carrying the marker. Values are never
 # echoed back: diagnostics identify line numbers so a hook cannot leak a secret.
 if [ -n "$LATEST" ]; then
-  LEAK_LINES=$(grep -nEv '<!-- journal-secrets-ok -->' "$LATEST" 2>/dev/null \
-    | grep -Ei 'e[y]J[A-Za-z0-9_-]{20,}|Bearer[[:space:]]+[A-Za-z0-9._-]{16,}|(client[_-]?secret|api[_-]?key|password|passphrase|token)[[:space:]]*[:=][[:space:]]*[^[:space:]]{6,}|[0-9a-f]{40,}|AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{16,}|-----BEGIN ([A-Z0-9 ]+ )?PRIVATE KEY-----' \
-    | cut -d: -f1 | head -n 3 | paste -sd, - || true)
+  CANDIDATES=$(grep -nEv '<!-- journal-secrets-ok -->' "$LATEST" 2>/dev/null || true)
+  # Credential shapes that carry their own prefix or assignment are always flagged.
+  NAMED=$(printf '%s\n' "$CANDIDATES" \
+    | grep -Ei 'e[y]J[A-Za-z0-9_-]{20,}|Bearer[[:space:]]+[A-Za-z0-9._-]{16,}|(client[_-]?secret|api[_-]?key|password|passphrase|token)[[:space:]]*[:=][[:space:]]*[^[:space:]]{6,}|AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{16,}|-----BEGIN ([A-Z0-9 ]+ )?PRIVATE KEY-----' || true)
+  # A bare long hex string is only suspicious away from digest context. SHA-256 artifact
+  # receipts, git revisions, and fingerprints are this program's evidence, not secrets, and
+  # must survive verbatim to stay verifiable.
+  #
+  # Context is read over a three-line window, NOT the hash's own line. Prose wraps, and a
+  # 64-character digest routinely lands on a line of its own with "hashes to" or "SHA-256"
+  # ending the line above; a single-line check sees a bare hex string and cries wolf.
+  BARE_HEX=$(awk '
+    { lines[NR] = $0 }
+    END {
+      for (i = 1; i <= NR; i++) {
+        if (lines[i] ~ /<!-- journal-secrets-ok -->/) continue
+        ctx = tolower((i > 1 ? lines[i-1] : "") " " lines[i] " " (i < NR ? lines[i+1] : ""))
+        if (ctx ~ /sha-?(1|256|384|512)|hash|digest|checksum|fingerprint|commit|revision|blob|oid|etag/) continue
+        print i ":" lines[i]
+      }
+    }' "$LATEST" 2>/dev/null | grep -Ei '[0-9a-f]{40,}' || true)
+  LEAK_LINES=$(printf '%s\n%s\n' "$NAMED" "$BARE_HEX" \
+    | grep -E '^[0-9]+:' | cut -d: -f1 | sort -n -u | head -n 3 | paste -sd, - || true)
   if [ -n "$LEAK_LINES" ]; then
     echo "SESSION-JOURNAL-SECRETS-GUARD: secret-looking content found in $LATEST at line(s) $LEAK_LINES. Redact values to key names or safe length-only descriptions before finishing." >&2
     exit 2

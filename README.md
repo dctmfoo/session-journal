@@ -61,7 +61,7 @@ The pointer makes this THIN mode: details stay in the release plan. With `none`,
 
 ## Safety model
 
-Journals are committed by default, so secret handling is deliberately strict. The Stop hook scans only the newest journal for JWT-like values, bearer values, credential assignments, common provider-token shapes, private-key headers, and long hexadecimal strings. It reports line numbers, never matched values. Use abbreviated commit hashes in journals; if a full hash is required, a verified false-positive line can carry `<!-- journal-secrets-ok -->`. That escape applies only to that line.
+Journals are committed by default, so secret handling is deliberately strict. The Stop hook scans only the newest journal for JWT-like values, bearer values, credential assignments, common provider-token shapes, private-key headers, and long hexadecimal strings. It reports line numbers, never matched values. Named credential shapes are always flagged. A bare hexadecimal string is flagged only away from digest context: if the line, the line above, or the line below mentions a digest, hash, checksum, fingerprint, commit, revision, blob, oid, or etag, the value is treated as verifiable evidence and left alone. A remaining false positive can carry `<!-- journal-secrets-ok -->`, and that escape applies only to its own line.
 
 This is a continuity aid, not a credential scanner for the whole repository. Keep your normal secret-scanning and review gates.
 

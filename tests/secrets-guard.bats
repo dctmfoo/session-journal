@@ -29,6 +29,31 @@ assert_secret_blocks() {
   [ "$status" -eq 0 ]
 }
 
+@test "a labelled SHA-256 digest on the next line does not trigger" {
+  journal="$(write_journal)"
+  printf '%s\n' 'The wheel artifact hashes to' \
+    '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef' >> "$journal"
+  run bash -c "printf '%s' '{\"stop_hook_active\":false}' | '$BATS_TEST_DIRNAME/../hooks/session-journal-nudge.sh'"
+  [ "$status" -eq 0 ]
+}
+
+@test "an inline git commit hash does not trigger" {
+  journal="$(write_journal)"
+  printf '%s\n' 'Recorded in commit 0123456789abcdef0123456789abcdef01234567 on the release branch.' >> "$journal"
+  run bash -c "printf '%s' '{\"stop_hook_active\":false}' | '$BATS_TEST_DIRNAME/../hooks/session-journal-nudge.sh'"
+  [ "$status" -eq 0 ]
+}
+
+@test "a named token assignment triggers without echoing the value" {
+  journal="$(write_journal)"
+  printf '%s\n' 'Digest context nearby: sha-256 receipts are evidence.' \
+    'token = definitely-secret-value' >> "$journal"
+  run bash -c "printf '%s' '{\"stop_hook_active\":false}' | '$BATS_TEST_DIRNAME/../hooks/session-journal-nudge.sh'"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"SECRETS-GUARD"* ]]
+  [[ "$output" != *"definitely-secret-value"* ]]
+}
+
 @test "a verified full commit hash can use the line-scoped allowlist" {
   journal="$(write_journal)"
   printf '%s\n' '0123456789abcdef0123456789abcdef01234567 <!-- journal-secrets-ok -->' >> "$journal"
