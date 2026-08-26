@@ -75,3 +75,44 @@ assert_secret_blocks() {
   [ "$status" -eq 2 ]
   [[ "$output" == *"SECRETS-GUARD"* ]]
 }
+
+assert_secret_passes() {
+  local vector="$1"
+  journal="$(write_journal)"
+  printf '%s\n' "$vector" >> "$journal"
+  run bash -c "printf '%s' '{\"stop_hook_active\":false}' | '$BATS_TEST_DIRNAME/../hooks/session-journal-nudge.sh'"
+  [ "$status" -eq 0 ]
+}
+
+@test "an angle-bracket redaction is accepted" { assert_secret_passes 'password: <redacted>'; }
+@test "an annotated redaction is accepted" { assert_secret_passes 'api_key: <redacted - see the deploy vault>'; }
+@test "a length-only description is accepted" { assert_secret_passes 'api_key: redacted (32 chars)'; }
+@test "a location description is accepted" { assert_secret_passes 'token: stored-in-ci-secrets'; }
+@test "an env-var reference is accepted" { assert_secret_passes 'api_key: $STRIPE_API_KEY'; }
+@test "a short placeholder is accepted" { assert_secret_passes 'client_secret: placeholder'; }
+
+@test "the guard names its own escape hatch when it blocks" {
+  journal="$(write_journal)"
+  printf '%s\n' 'token = definitely-secret-value' >> "$journal"
+  run bash -c "printf '%s' '{\"stop_hook_active\":false}' | '$BATS_TEST_DIRNAME/../hooks/session-journal-nudge.sh'"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"journal-secrets-ok"* ]]
+}
+
+@test "prose containing a digest keyword as a substring does not disable hex detection" {
+  journal="$(write_journal)"
+  printf '%s\n' 'Avoid rerunning the importer.' \
+    '0123456789abcdef0123456789abcdef01234567' \
+    'Android build is green.' >> "$journal"
+  run bash -c "printf '%s' '{\"stop_hook_active\":false}' | '$BATS_TEST_DIRNAME/../hooks/session-journal-nudge.sh'"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"SECRETS-GUARD"* ]]
+}
+
+@test "a whole-word digest keyword still exempts a receipt" {
+  journal="$(write_journal)"
+  printf '%s\n' 'Release tarball SHA-256:' \
+    '0123456789abcdef0123456789abcdef01234567' >> "$journal"
+  run bash -c "printf '%s' '{\"stop_hook_active\":false}' | '$BATS_TEST_DIRNAME/../hooks/session-journal-nudge.sh'"
+  [ "$status" -eq 0 ]
+}

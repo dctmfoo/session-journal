@@ -66,3 +66,120 @@ teardown() { teardown_workspace; }
   [ "$status" -eq 2 ]
   [[ "$output" == *"No session journal exists"* ]]
 }
+
+@test "pretty-printed hook JSON still honours stop_hook_active" {
+  journal="$(write_journal)"
+  make_stale "$journal"
+  run bash -c "printf '{\n  \"stop_hook_active\": true\n}\n' | '$BATS_TEST_DIRNAME/../hooks/session-journal-nudge.sh'"
+  [ "$status" -eq 0 ]
+}
+
+@test "an expired one-shot marker does not swallow a later session's nudge" {
+  journal="$(write_journal)"
+  make_stale "$journal"
+  marker_dir="${TMPDIR:-/tmp}/session-journal-nudge-$(printf '%s' "$TEST_ROOT" | cksum | awk '{print $1}').d"
+
+  run "$BATS_TEST_DIRNAME/../hooks/session-journal-nudge.sh"
+  [ "$status" -eq 2 ]
+  [ -d "$marker_dir" ]
+
+  touch -t 202001010000 "$marker_dir"
+  run "$BATS_TEST_DIRNAME/../hooks/session-journal-nudge.sh"
+  [ "$status" -eq 2 ]
+}
+
+@test "SESSION_JOURNAL_SKIP suppresses the freshness nudge" {
+  journal="$(write_journal)"
+  make_stale "$journal"
+  run env SESSION_JOURNAL_SKIP=1 "$BATS_TEST_DIRNAME/../hooks/session-journal-nudge.sh" <<< '{"stop_hook_active":false}'
+  [ "$status" -eq 0 ]
+}
+
+@test "SESSION_JOURNAL_SKIP does not suppress the secrets guard" {
+  journal="$(write_journal)"
+  printf '%s\n' 'token = definitely-secret-value' >> "$journal"
+  run env SESSION_JOURNAL_SKIP=1 "$BATS_TEST_DIRNAME/../hooks/session-journal-nudge.sh" <<< '{"stop_hook_active":false}'
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"SECRETS-GUARD"* ]]
+}
+
+@test "a non-numeric freshness window falls back to the default" {
+  journal="$(write_journal)"
+  make_stale "$journal"
+  run env JOURNAL_FRESH_SECS=5m "$BATS_TEST_DIRNAME/../hooks/session-journal-nudge.sh" <<< '{"stop_hook_active":false}'
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"is not a whole number of seconds"* ]]
+}
+
+@test "identical mtimes select the later filename for the freshness check" {
+  thin="$(write_journal 2026-01-02-0304-alpha.md docs/plans/work.md 'ACTIVE - alpha')"
+  detailed="$(write_journal 2026-08-20-1500-charlie.md none 'ACTIVE - charlie')"
+  tie_mtimes "$thin" "$detailed"
+  touch -t 202001010000 "$thin" "$detailed"
+
+  run bash -c "printf '%s' '{\"stop_hook_active\":false}' | '$BATS_TEST_DIRNAME/../hooks/session-journal-nudge.sh'"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"DETAILED mode"* ]]
+}
+
+@test "the nudge never creates the sessions directory" {
+  rmdir "$SESSION_JOURNAL_DIR"
+  run bash -c "printf '%s' '{\"stop_hook_active\":false}' | '$BATS_TEST_DIRNAME/../hooks/session-journal-nudge.sh'"
+  [ "$status" -eq 2 ]
+  [ ! -d "$SESSION_JOURNAL_DIR" ]
+}
+
+@test "a touched but unchanged journal does not satisfy the gate when other work happened" {
+  setup_git_workspace
+  journal="$(write_journal)"
+  commit_workspace "baseline"
+  printf 'v2\n' > "$TEST_ROOT/src/app.txt"
+  touch "$journal"
+
+  run bash -c "printf '%s' '{\"stop_hook_active\":false}' | '$BATS_TEST_DIRNAME/../hooks/session-journal-nudge.sh'"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"timestamp moved but its content did not"* ]]
+}
+
+@test "a genuinely edited journal satisfies the gate" {
+  setup_git_workspace
+  journal="$(write_journal)"
+  commit_workspace "baseline"
+  printf 'v2\n' > "$TEST_ROOT/src/app.txt"
+  printf -- '- recorded the change\n' >> "$journal"
+
+  run bash -c "printf '%s' '{\"stop_hook_active\":false}' | '$BATS_TEST_DIRNAME/../hooks/session-journal-nudge.sh'"
+  [ "$status" -eq 0 ]
+}
+
+@test "a clean work tree needs no journal movement" {
+  setup_git_workspace
+  write_journal >/dev/null
+  commit_workspace "baseline"
+
+  run bash -c "printf '%s' '{\"stop_hook_active\":false}' | '$BATS_TEST_DIRNAME/../hooks/session-journal-nudge.sh'"
+  [ "$status" -eq 0 ]
+}
+
+@test "JOURNAL_REQUIRE_CONTENT_CHANGE=0 restores mtime-only freshness" {
+  setup_git_workspace
+  journal="$(write_journal)"
+  commit_workspace "baseline"
+  printf 'v2\n' > "$TEST_ROOT/src/app.txt"
+  touch "$journal"
+
+  run env JOURNAL_REQUIRE_CONTENT_CHANGE=0 "$BATS_TEST_DIRNAME/../hooks/session-journal-nudge.sh" <<< '{"stop_hook_active":false}'
+  [ "$status" -eq 0 ]
+}
+
+@test "a gitignored journal falls back to mtime-only freshness" {
+  setup_git_workspace
+  journal="$(write_journal)"
+  printf 'sessions/\n' > "$TEST_ROOT/.gitignore"
+  commit_workspace "baseline"
+  printf 'v2\n' > "$TEST_ROOT/src/app.txt"
+  touch "$journal"
+
+  run bash -c "printf '%s' '{\"stop_hook_active\":false}' | '$BATS_TEST_DIRNAME/../hooks/session-journal-nudge.sh'"
+  [ "$status" -eq 0 ]
+}
