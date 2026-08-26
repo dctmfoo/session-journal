@@ -23,7 +23,7 @@ none
 - 2026-08-27 02:45 — Installer made safe to run twice and safe to fail; `doctor.sh` added. Suite 70 → 89.
 - 2026-08-27 02:54 — Docs, spec 1.1, CHANGELOG, SECURITY.md, and CI hardening. Suite 89 → 95.
 - 2026-08-27 03:20 — Adversarial re-review of the branch. It earned its keep: the secrets guard I "fixed" had in fact stopped catching `PASSWORD="..."`, backticked, and punctuated values, and a plain installer re-run silently relocated the journal directory, orphaning real journals.
-- 2026-08-27 03:30 — All six confirmed regressions corrected, each with a regression test. Suite 95 → 121.
+- 2026-08-27 03:30 — All six confirmed regressions corrected, each with a regression test. Suite 95 → 123.
 
 ## Decisions and constraints
 
@@ -37,7 +37,7 @@ none
 
 Prefer re-running these over trusting the numbers:
 
-- `bats tests` — 121 checks, currently all passing. `tests/docs.bats` fails deliberately if this count drifts from `grep -c '^@test' tests/*.bats`.
+- `bats tests` — 123 checks, currently all passing. `tests/docs.bats` fails deliberately if this count drifts from `grep -c '^@test' tests/*.bats`.
 - `shellcheck hooks/*.sh extras/spine-promotion/*.sh install.sh doctor.sh` — clean.
 - `./doctor.sh .` — passes against this repository's own installation.
 - Fresh-clone selection: clone a repo with journals dated January, May and August; the pointer must name the August journal. Was naming January.
@@ -52,7 +52,7 @@ Prefer re-running these over trusting the numbers:
 - `a9e4e2a` fix: make installation safe to run twice and safe to fail, and add a doctor
 - `afb51d6` docs: state the selection rule, hold the prose under test, and dogfood the discipline
 - `5fc948c` docs: teach ADOPT.md the doctor, the template, and the handoff to a team
-- `2a1ddcd` fix: repair the regressions an adversarial review found in the 1.1.0 fixes
+- fix: repair the regressions an adversarial review found in the 1.1.0 fixes — the branch tip; cited by subject because a commit cannot carry its own hash, and amending one invalidates any hash written before the amend
 
 ## Files touched
 
@@ -68,7 +68,7 @@ Prefer re-running these over trusting the numbers:
 
 All twelve original defects are fixed, and so are the six regressions the
 adversarial review found in those fixes. Both rounds have regression tests; the
-suite went 41 → 121. The project now dogfoods itself: `.claude/` is installed
+suite went 41 → 123. The project now dogfoods itself: `.claude/` is installed
 here, so CI's `./doctor.sh .` step is a real check rather than a formality.
 
 The two changes flagged as riskiest before the review were exactly the two that
@@ -97,3 +97,4 @@ moving `main`.
 - 2026-08-27 01:30 — journal created
 - 2026-08-27 02:54 — recorded hook, installer, doctor, docs, and CI work
 - 2026-08-27 03:30 — recorded the adversarial review and the six regressions it caught
+- 2026-08-27 03:45 — corrected two stale claims in this journal (a rewritten commit hash, a superseded test count); both were the drift the specification warns about, found by re-reading rather than by a tool
