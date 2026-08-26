@@ -34,25 +34,36 @@ SESSIONS_REL="sessions"
 STOP_COMMAND=""
 START_COMMAND=""
 
+# The event matters, not just the presence of the string. A command registered
+# under some other event -- or left behind by a hand-edit -- must not be reported
+# as a working SessionStart or Stop hook.
 read_command() {
-  local file=$1 hook=$2
+  local file=$1 event=$2 hook=$3
   [ -e "$file" ] || return 0
   command -v jq >/dev/null 2>&1 || return 0
-  jq -r --arg hook "$hook" '
-    [.hooks // {} | to_entries[] | .value[]? | .hooks[]? | .command // ""]
+  jq -r --arg event "$event" --arg hook "$hook" '
+    [(.hooks // {})[$event][]? | .hooks[]? | .command // ""]
     | map(select(contains($hook))) | first // ""
   ' "$file" 2>/dev/null || printf ''
 }
 
 for candidate_settings in "$SETTINGS" "$CODEX_SETTINGS"; do
-  [ -n "$START_COMMAND" ] || START_COMMAND=$(read_command "$candidate_settings" session-journal-pointer.sh)
-  [ -n "$STOP_COMMAND" ] || STOP_COMMAND=$(read_command "$candidate_settings" session-journal-nudge.sh)
+  [ -n "$START_COMMAND" ] || START_COMMAND=$(read_command "$candidate_settings" SessionStart session-journal-pointer.sh)
+  [ -n "$STOP_COMMAND" ] || STOP_COMMAND=$(read_command "$candidate_settings" Stop session-journal-nudge.sh)
 done
 
+# Anchor on the ")/" that closes the command substitution in the generated
+# prefix. A greedy ".*/" would swallow every leading path segment and report
+# `docs/sessions` as `sessions`, then fail three checks against a healthy repo.
 case "$STOP_COMMAND$START_COMMAND" in
   *SESSION_JOURNAL_DIR=*)
     SESSIONS_REL=$(printf '%s' "$STOP_COMMAND$START_COMMAND" \
-      | sed -n 's|.*SESSION_JOURNAL_DIR="[^"]*/\([^"]*\)".*|\1|p' | head -n 1)
+      | sed -n 's|.*SESSION_JOURNAL_DIR="[^"]*)/\([^"]*\)".*|\1|p' | head -n 1)
+    if [ -z "$SESSIONS_REL" ]; then
+      SESSIONS_REL=$(printf '%s' "$STOP_COMMAND$START_COMMAND" \
+        | sed -n 's|.*SESSION_JOURNAL_DIR="\([^"]*\)".*|\1|p' | head -n 1)
+      SESSIONS_REL=${SESSIONS_REL#"$TARGET"/}
+    fi
     [ -n "$SESSIONS_REL" ] || SESSIONS_REL="sessions"
     ;;
 esac

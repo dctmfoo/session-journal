@@ -32,13 +32,16 @@ for candidate in "$SESSIONS_DIR"/*.md; do
 done
 [ -n "$LATEST" ] || { printf '{}\n'; exit 0; }
 
-PLAN=$(awk '/^## Live plan pointer[[:space:]]*$/{inside=1;next} inside&&/^## /{exit} inside&&NF{print;exit}' "$LATEST" 2>/dev/null || true)
+# Headings match case-insensitively, as the specification requires and as both
+# core hooks do. Left exact, this hook read a title-cased THIN journal as
+# DETAILED and blocked Stop with a message that was simply untrue.
+PLAN=$(awk 'tolower($0) ~ /^##[[:space:]]+live plan pointer[[:space:]]*$/{inside=1;next} inside&&/^## /{exit} inside&&NF{print;exit}' "$LATEST" 2>/dev/null || true)
 [ -z "$PLAN" ] || [ "$(printf '%s' "$PLAN" | tr '[:upper:]' '[:lower:]')" = "none" ] || { printf '{}\n'; exit 0; }
 
 # An unreadable journal must not hand raw awk diagnostics to the agent as a Stop
 # block. Failing open here is correct: this is an optional advisory nudge, and
 # the core freshness and secrets hooks own the enforcement path.
-COUNT=$(awk '/^## Milestones[[:space:]]*$/{inside=1;next} inside&&/^## /{exit} inside&&/^[[:space:]]*[-*] /{count++} END{print count+0}' "$LATEST" 2>/dev/null || printf '0')
+COUNT=$(awk 'tolower($0) ~ /^##[[:space:]]+milestones[[:space:]]*$/{inside=1;next} inside&&/^## /{exit} inside&&/^[[:space:]]*[-*] /{count++} END{print count+0}' "$LATEST" 2>/dev/null || printf '0')
 case "$COUNT" in
   ''|*[!0-9]*) COUNT=0 ;;
 esac

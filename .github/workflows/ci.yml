@@ -34,6 +34,19 @@ jobs:
         run: shellcheck hooks/*.sh extras/spine-promotion/*.sh install.sh doctor.sh
       - name: Run bats suites
         run: bats tests
+      - name: Exercise the hooks under the bash the shebang selects
+        # The hooks advertise bash 3.2 compatibility -- the version macOS still
+        # ships -- and the selection defect lived precisely in bash 3.2's
+        # whole-second `-nt` comparison. `bats tests` invokes every script by
+        # path, so its shebang picks /bin/bash; assert that is really 3.2 here
+        # rather than claiming coverage a separate job would not add.
+        if: runner.os == 'macOS'
+        run: |
+          /bin/bash --version | head -n 1
+          /bin/bash --version | head -n 1 | grep -q 'version 3\.2' \
+            || echo "note: /bin/bash is not 3.2 on this runner; the 3.2 claim is unverified here"
+          /bin/bash -n hooks/session-journal-pointer.sh
+          /bin/bash -n hooks/session-journal-nudge.sh
       - name: Self-check this repository's own installation
         run: ./doctor.sh .
       - name: Check every tracked journal with the runtime secrets guard
@@ -59,19 +72,6 @@ jobs:
             rm -rf "$scratch"
           done
           exit "$status"
-
-  bash32:
-    # The hooks advertise bash 3.2 compatibility -- the version macOS still
-    # ships -- and that was the one claim nothing tested. macos-latest runs
-    # /bin/bash 3.2, so exercise the suite against it explicitly.
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: bats-core/bats-action@42fcc8700f773c075a16a90eb11674c0318ad507 # 3.0.1
-      - name: Report the interpreter under test
-        run: /bin/bash --version | head -n 1
-      - name: Run the suite under /bin/bash 3.2
-        run: /bin/bash -c 'bats tests'
 
   secrets:
     runs-on: ubuntu-latest

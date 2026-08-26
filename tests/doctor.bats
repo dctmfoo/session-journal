@@ -87,3 +87,22 @@ commit_target() {
   [ "$status" -eq 1 ]
   [[ "$output" == *"balanced session-journal block"* ]]
 }
+
+@test "a nested journal directory is resolved, not truncated" {
+  "$BATS_TEST_DIRNAME/../install.sh" "$TARGET" --sessions-dir docs/sessions >/dev/null
+  commit_target
+  run "$BATS_TEST_DIRNAME/../doctor.sh" "$TARGET"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"docs/sessions/"* ]]
+  [[ "$output" != *"FAIL"* ]]
+}
+
+@test "a hook registered under the wrong event is not credited" {
+  "$BATS_TEST_DIRNAME/../install.sh" "$TARGET" >/dev/null
+  jq '.hooks.PreToolUse = .hooks.Stop | .hooks.Stop = []' "$TARGET/.claude/settings.json" > "$TARGET/settings.new"
+  mv "$TARGET/settings.new" "$TARGET/.claude/settings.json"
+  commit_target
+  run "$BATS_TEST_DIRNAME/../doctor.sh" "$TARGET"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"a Stop hook is registered"* ]]
+}

@@ -57,3 +57,18 @@ add_milestones() {
   [ "$status" -eq 2 ]
   [[ "$output" == *"specs/"* ]]
 }
+
+@test "a title-cased THIN journal is recognised as THIN" {
+  journal="$SESSION_JOURNAL_DIR/2026-01-02-0304-cased.md"
+  printf '**Status:** ACTIVE\n\n## Live Plan Pointer\ndocs/plans/release.md\n\n## Milestones\n- a\n- b\n- c\n- d\n- e\n- f\n' > "$journal"
+  run "$BATS_TEST_DIRNAME/../extras/spine-promotion/journal-spine-promotion-nudge.sh"
+  [ "$status" -eq 0 ]
+}
+
+@test "a title-cased DETAILED journal still counts its milestones" {
+  journal="$SESSION_JOURNAL_DIR/2026-01-02-0304-cased.md"
+  printf '**Status:** ACTIVE\n\n## Live Plan Pointer\nnone\n\n## Milestones\n- a\n- b\n- c\n- d\n- e\n- f\n' > "$journal"
+  run "$BATS_TEST_DIRNAME/../extras/spine-promotion/journal-spine-promotion-nudge.sh"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"6 milestones"* ]]
+}

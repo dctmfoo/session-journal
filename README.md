@@ -97,14 +97,14 @@ Every setting is an environment variable on the generated hook command, so it li
 | `SESSION_JOURNAL_DIR` | `<repo>/sessions` | Journal directory. Set by `--sessions-dir`. |
 | `JOURNAL_FRESH_SECS` | `300` | How old the newest journal may be before `Stop` nudges. |
 | `SESSION_JOURNAL_SKIP` | unset | Set to `1` for a session that genuinely needs no journal — a typo fix, a dependency bump. The secrets guard still runs. |
-| `JOURNAL_REQUIRE_CONTENT_CHANGE` | `1` | Require the journal's content to have changed when other files did, not just its timestamp. Set to `0` for mtime-only freshness. |
+| `JOURNAL_REQUIRE_CONTENT_CHANGE` | `1` | Require the journal's content to have changed when tracked files did, not just its timestamp. Set to `0` for mtime-only freshness. |
 | `JOURNAL_STOP_MARKER_TTL_SECS` | `60` | How long the one-shot loop marker stays valid, for runners that supply no stdin. |
 
 ## Safety model
 
 Journals are committed by default, so secret handling is deliberately strict. The Stop hook scans only the newest journal for JWT-like values, bearer values, credential assignments, provider-token shapes, private-key headers, and long hexadecimal strings. It reports line numbers, never matched values.
 
-Self-identifying shapes are always flagged. For a `key: value` assignment the *value* is inspected, not just the key name, so the redactions this guard asks for — `<redacted>`, `$STRIPE_API_KEY`, `redacted (32 chars)`, `stored-in-ci-secrets` — are accepted rather than blocking the agent in a redact-and-reblock loop. A bare hexadecimal string is flagged only away from digest context: if the line, the line above, or the line below mentions a digest, hash, checksum, fingerprint, commit, revision, blob, oid, or etag *as a whole word*, the value is treated as verifiable evidence and left alone. A remaining false positive can carry `<!-- journal-secrets-ok -->`, and that escape applies only to its own line.
+Self-identifying shapes are always flagged. For a `key: value` assignment the *value* is inspected, not just the key name, so the redactions this guard asks for — `<redacted>`, `$STRIPE_API_KEY`, `redacted (32 chars)`, `stored-in-ci-secrets` — are accepted rather than blocking the agent in a redact-and-reblock loop. Quotes, backticks and markdown emphasis are stripped before that check, so `PASSWORD="…"` and a backticked value are still caught, and every credential key on a line is examined rather than only the first. A bare hexadecimal string is flagged only away from digest context: if the line, the line above, or the line below mentions a digest, hash, checksum, fingerprint, commit, revision, blob, oid, or etag *as a whole word*, the value is treated as verifiable evidence and left alone. A remaining false positive can carry `<!-- journal-secrets-ok -->`, and that escape applies only to its own line.
 
 This is a continuity aid, not a credential scanner for the whole repository. Keep your normal secret-scanning and review gates. See [SECURITY.md](SECURITY.md).
 
@@ -132,7 +132,7 @@ Indexed by what you actually observe.
 
 **`Stop` keeps blocking no matter what the agent writes.** The secrets guard is matching something. It runs ahead of the loop protection by design, so `stop_hook_active` will not clear it. The message names the line numbers; redact the value to a key name, an env-var reference, or `<redacted>`. If the line is a verified false positive, append `<!-- journal-secrets-ok -->` to it.
 
-**`Stop` nudges even though the journal was just updated.** Since 1.1.0 the gate requires content to change, not just the timestamp, when other files in the repository changed. If your workflow legitimately touches without editing, set `JOURNAL_REQUIRE_CONTENT_CHANGE=0`.
+**`Stop` nudges even though the journal was just updated.** Since 1.1.0 the gate requires content to change, not just the timestamp, when *tracked* files changed. Untracked scratch files are ignored, and a journal committed alongside its work counts as recorded. If it still misfires for your workflow, set `JOURNAL_REQUIRE_CONTENT_CHANGE=0`.
 
 **Every trivial session demands a journal.** Set `SESSION_JOURNAL_SKIP=1` for that session.
 

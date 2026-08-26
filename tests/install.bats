@@ -205,3 +205,91 @@ teardown() { teardown_workspace; }
   [ -x "$TARGET/.claude/hooks/session-journal-nudge.sh" ]
   [ "$(jq '.hooks.Stop | length' "$TARGET/.claude/settings.json")" -eq 1 ]
 }
+
+@test "a plan pointer containing sed metacharacters survives substitution" {
+  run "$BATS_TEST_DIRNAME/../install.sh" "$TARGET" --plan-pointer 'docs/a&b.md'
+  [ "$status" -eq 0 ]
+  grep -Fq 'docs/a&b.md' "$TARGET/sessions/README.md"
+  grep -Fq 'docs/a&b.md' "$TARGET/sessions/TEMPLATE.md"
+  ! grep -Fq '{{DEFAULT_PLAN_POINTER}}' "$TARGET/sessions/README.md"
+}
+
+@test "--help is reachable without a target" {
+  run "$BATS_TEST_DIRNAME/../install.sh" --help
+  [ "$status" -eq 64 ]
+  [[ "$output" == *"--plan-pointer"* ]]
+}
+
+@test "a rerun without --sessions-dir keeps the configured journal directory" {
+  "$BATS_TEST_DIRNAME/../install.sh" "$TARGET" --sessions-dir docs/sessions >/dev/null
+  printf 'journal\n' > "$TARGET/docs/sessions/2026-01-02-0304-real.md"
+  run "$BATS_TEST_DIRNAME/../install.sh" "$TARGET"
+  [ "$status" -eq 0 ]
+  [ -f "$TARGET/docs/sessions/2026-01-02-0304-real.md" ]
+  [ ! -d "$TARGET/sessions" ]
+  jq -e '.hooks.Stop[0].hooks[0].command | contains("docs/sessions")' "$TARGET/.claude/settings.json" >/dev/null
+}
+
+@test "an explicit --sessions-dir still relocates on a rerun" {
+  "$BATS_TEST_DIRNAME/../install.sh" "$TARGET" --sessions-dir docs/sessions >/dev/null
+  run "$BATS_TEST_DIRNAME/../install.sh" "$TARGET" --sessions-dir sessions
+  [ "$status" -eq 0 ]
+  [ -f "$TARGET/sessions/README.md" ]
+}
+
+@test "a quoted environment override survives a rerun" {
+  "$BATS_TEST_DIRNAME/../install.sh" "$TARGET" >/dev/null
+  jq '.hooks.Stop[0].hooks[0].command = ("JOURNAL_FRESH_SECS=\"900\" " + .hooks.Stop[0].hooks[0].command)' \
+    "$TARGET/.claude/settings.json" > "$TARGET/settings.new"
+  mv "$TARGET/settings.new" "$TARGET/.claude/settings.json"
+  run "$BATS_TEST_DIRNAME/../install.sh" "$TARGET"
+  [ "$status" -eq 0 ]
+  jq -e '.hooks.Stop[0].hooks[0].command | startswith("JOURNAL_FRESH_SECS=\"900\" ")' "$TARGET/.claude/settings.json" >/dev/null
+}
+
+@test "a command registered under another event cannot contribute to the generated one" {
+  "$BATS_TEST_DIRNAME/../install.sh" "$TARGET" >/dev/null
+  jq '.hooks.PreToolUse = [{hooks:[{type:"command",command:"AUDIT=x session-journal-nudge.sh"}]}]' \
+    "$TARGET/.claude/settings.json" > "$TARGET/settings.new"
+  mv "$TARGET/settings.new" "$TARGET/.claude/settings.json"
+  run "$BATS_TEST_DIRNAME/../install.sh" "$TARGET"
+  [ "$status" -eq 0 ]
+  jq -e '.hooks.Stop[0].hooks[0].command | contains("AUDIT=") | not' "$TARGET/.claude/settings.json" >/dev/null
+}
+
+@test "a newline in --plan-pointer is refused before anything is written" {
+  run "$BATS_TEST_DIRNAME/../install.sh" "$TARGET" --plan-pointer "$(printf 'a\nb')"
+  [ "$status" -eq 64 ]
+  [ ! -e "$TARGET/.claude/settings.json" ]
+  [ ! -e "$TARGET/sessions/README.md" ]
+}
+
+@test "uninstall refuses on an unmatched AGENTS.md sentinel without Codex flags" {
+  "$BATS_TEST_DIRNAME/../install.sh" "$TARGET" --codex >/dev/null
+  printf '\n<!-- session-journal:begin -->\n' >> "$TARGET/AGENTS.md"
+  before="$(cksum < "$TARGET/AGENTS.md")"
+  run "$BATS_TEST_DIRNAME/../install.sh" "$TARGET" --uninstall
+  [ "$status" -eq 65 ]
+  [ "$(cksum < "$TARGET/AGENTS.md")" = "$before" ]
+  [ -x "$TARGET/.claude/hooks/session-journal-nudge.sh" ]
+}
+
+@test "uninstall does not leave behind instruction files it created" {
+  "$BATS_TEST_DIRNAME/../install.sh" "$TARGET" --codex >/dev/null
+  [ -f "$TARGET/CLAUDE.md" ]
+  [ -f "$TARGET/AGENTS.md" ]
+  run "$BATS_TEST_DIRNAME/../install.sh" "$TARGET" --codex --uninstall
+  [ "$status" -eq 0 ]
+  [ ! -e "$TARGET/CLAUDE.md" ]
+  [ ! -e "$TARGET/AGENTS.md" ]
+}
+
+@test "uninstall preserves an instruction file that had other content" {
+  printf '# Project rules\n\nBe careful.\n' > "$TARGET/CLAUDE.md"
+  "$BATS_TEST_DIRNAME/../install.sh" "$TARGET" >/dev/null
+  run "$BATS_TEST_DIRNAME/../install.sh" "$TARGET" --uninstall
+  [ "$status" -eq 0 ]
+  [ -f "$TARGET/CLAUDE.md" ]
+  grep -Fq 'Be careful.' "$TARGET/CLAUDE.md"
+  ! grep -Fq 'session-journal:begin' "$TARGET/CLAUDE.md"
+}

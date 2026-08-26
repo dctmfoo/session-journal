@@ -19,9 +19,11 @@ USAGE
 }
 
 [ "$#" -ge 1 ] || usage
+case "$1" in -h|--help) usage ;; esac
 TARGET=$1
 shift
 SESSIONS_REL="sessions"
+SESSIONS_REL_EXPLICIT=false
 PLAN_POINTER="none"
 INSTALL_CODEX=false
 INSTALL_CLAUDE=true
@@ -33,6 +35,7 @@ while [ "$#" -gt 0 ]; do
     --sessions-dir)
       [ "$#" -ge 2 ] || usage
       SESSIONS_REL=$2
+      SESSIONS_REL_EXPLICIT=true
       shift 2
       ;;
     --plan-pointer)
@@ -57,8 +60,9 @@ case "$SESSIONS_REL" in
 esac
 
 case "$PLAN_POINTER" in
-  *[\"\\]*|*"|"*)
-    echo "--plan-pointer must not contain quotes, backslashes, or pipes" >&2
+  *[\"\\]*|*"|"*|*"
+"*)
+    echo "--plan-pointer must not contain quotes, backslashes, pipes, or newlines" >&2
     exit 64
     ;;
 esac
@@ -105,8 +109,15 @@ has_owned_block() {
   [ -e "$1" ] && grep -q '<!-- session-journal:begin -->' "$1" 2>/dev/null
 }
 
+# `&` in a sed replacement expands to the whole match, so an unescaped value
+# containing one silently rewrites itself into the placeholder it was replacing:
+# --plan-pointer 'docs/a&b.md' produced 'docs/a{{DEFAULT_PLAN_POINTER}}b.md'.
+sed_replacement() {
+  printf '%s' "$1" | sed 's/[&\\|]/\\&/g'
+}
+
 render_template() {
-  sed "s|{{SESSIONS_DIR}}|$SESSIONS_REL|g; s|{{DEFAULT_PLAN_POINTER}}|$PLAN_POINTER|g; s|{{TIMEZONE}}|$TIMEZONE|g; s|{{EVIDENCE_VOCABULARY}}|$EVIDENCE_VOCABULARY|g" "$1"
+  sed "s|{{SESSIONS_DIR}}|$(sed_replacement "$SESSIONS_REL")|g; s|{{DEFAULT_PLAN_POINTER}}|$(sed_replacement "$PLAN_POINTER")|g; s|{{TIMEZONE}}|$(sed_replacement "$TIMEZONE")|g; s|{{EVIDENCE_VOCABULARY}}|$(sed_replacement "$EVIDENCE_VOCABULARY")|g" "$1"
 }
 
 replace_owned_block() {
@@ -133,6 +144,10 @@ remove_owned_block() {
   local tmp="$destination.session-journal.tmp"
   strip_owned_block "$destination" > "$tmp"
   mv "$tmp" "$destination"
+  # replace_owned_block creates the instruction file when a repository has none.
+  # Leaving a zero-byte CLAUDE.md or AGENTS.md behind is not the reverse of an
+  # install: tools that look for one would find an empty contract.
+  [ -s "$destination" ] || rm -f "$destination"
 }
 
 remove_hooks() {
@@ -148,10 +163,80 @@ remove_hooks() {
   mv "$tmp" "$file"
 }
 
+# ADOPT.md Phase B tells the adopting agent to add environment overrides such as
+# JOURNAL_FRESH_SECS to the generated command. Rebuilding the command from
+# scratch deleted them on every re-run, so carry any foreign assignments across.
+# ADOPT.md Phase B tells the adopting agent to add environment overrides such as
+# JOURNAL_FRESH_SECS to the generated command. Rebuilding the command from
+# scratch deleted them on every re-run, so carry any foreign assignments across.
+#
+# Only the leading assignments of the matching command are read -- that is the
+# one place a shell env prefix can legally live -- and quoted values are parsed
+# rather than stripped. Stripping quotes first turned NAME="value" into NAME=,
+# silently dropping exactly the override this exists to preserve, and reading
+# the whole command string would let an unrelated hook that merely mentions the
+# script name contribute text to a freshly generated command.
+existing_command() {
+  local file=$1 event=$2 hook=$3
+  [ -e "$file" ] || return 0
+  jq -r --arg event "$event" --arg hook "$hook" '
+    [(.hooks // {})[$event][]? | .hooks[]? | .command // ""]
+    | map(select(contains($hook))) | first // ""
+  ' "$file" 2>/dev/null || printf ''
+}
+
+parse_env_prefix() {
+  local rest=$1 keep=$2 name value out=""
+  while :; do
+    case "$rest" in
+      [A-Za-z_]*=*) ;;
+      *) break ;;
+    esac
+    name=${rest%%=*}
+    case "$name" in *[!A-Za-z0-9_]*) break ;; esac
+    rest=${rest#*=}
+    if [ "${rest#\"}" != "$rest" ]; then
+      rest=${rest#\"}
+      value="\"${rest%%\"*}\""
+      rest=${rest#*\"}
+    else
+      value=${rest%% *}
+      rest=${rest#"$value"}
+    fi
+    if [ "$keep" = "all" ] || [ "$name" != "SESSION_JOURNAL_DIR" ]; then
+      out="$out$name=$value "
+    fi
+    rest=${rest# }
+  done
+  printf '%s' "$out"
+}
+
+preserved_env() {
+  local existing
+  existing=$(existing_command "$1" "$2" "$3")
+  [ -n "$existing" ] || return 0
+  parse_env_prefix "$existing" foreign
+}
+
+# The journal directory a previous install wired into this settings file, as a
+# path relative to the repository root, or empty when the default is in use.
+configured_sessions_dir() {
+  local existing
+  existing=$(existing_command "$1" "$2" "$3")
+  [ -n "$existing" ] || return 0
+  # Matched in place rather than split on spaces: the generated value contains a
+  # command substitution, which contains spaces of its own.
+  parse_env_prefix "$existing" all \
+    | sed -n 's|.*SESSION_JOURNAL_DIR="[^"]*)/\([^"]*\)".*|\1|p' \
+    | head -n 1
+}
+
 if [ "$UNINSTALL" = true ]; then
   # Refuse before touching anything, so a refusal never leaves a half state.
-  [ "$INSTALL_CLAUDE" = false ] || sentinels_balanced "$TARGET/CLAUDE.md" || exit 65
-  [ "$INSTALL_CODEX" = false ] || sentinels_balanced "$TARGET/AGENTS.md" || exit 65
+  # Both files are checked regardless of the runtime flags, because
+  # remove_owned_block below strips both regardless of the runtime flags.
+  sentinels_balanced "$TARGET/CLAUDE.md" || exit 65
+  sentinels_balanced "$TARGET/AGENTS.md" || exit 65
   remove_hooks "$CLAUDE_SETTINGS"
   remove_hooks "$CODEX_SETTINGS"
   rm -f "$TARGET/.claude/hooks/session-journal-pointer.sh" "$TARGET/.claude/hooks/session-journal-nudge.sh"
@@ -186,6 +271,23 @@ if GIT_TOPLEVEL=$(git -C "$TARGET" rev-parse --show-toplevel 2>/dev/null); then
   fi
 else
   echo "Note: $TARGET is not a git repository. The hook commands fall back to the agent's working directory at runtime; start the agent from the repository root." >&2
+fi
+
+# A rerun without --sessions-dir must not silently relocate the journal
+# directory. Rebuilding the command from the default orphaned every existing
+# journal -- the hooks began pointing at an empty `sessions/` while the real
+# history sat unreachable in `docs/sessions/` -- and reported success.
+if [ "$SESSIONS_REL_EXPLICIT" = false ]; then
+  for candidate_settings in "$CLAUDE_SETTINGS" "$CODEX_SETTINGS"; do
+    [ -e "$candidate_settings" ] || continue
+    existing_dir=$(configured_sessions_dir "$candidate_settings" Stop session-journal-nudge.sh)
+    [ -n "$existing_dir" ] || existing_dir=$(configured_sessions_dir "$candidate_settings" SessionStart session-journal-pointer.sh)
+    if [ -n "$existing_dir" ] && [ "$existing_dir" != "$SESSIONS_REL" ]; then
+      SESSIONS_REL=$existing_dir
+      echo "Reusing the journal directory already configured here: $SESSIONS_REL/ (pass --sessions-dir to move it)."
+      break
+    fi
+  done
 fi
 
 # A symlinked journal directory that escapes the repository silently makes
@@ -241,25 +343,6 @@ RUNTIME_ROOT="\$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 GENERATED_PREFIX=""
 [ "$SESSIONS_REL" = "sessions" ] || GENERATED_PREFIX="SESSION_JOURNAL_DIR=\"$RUNTIME_ROOT/$SESSIONS_REL\" "
 
-# ADOPT.md Phase B tells the adopting agent to add environment overrides such as
-# JOURNAL_FRESH_SECS to the generated command. Rebuilding the command from
-# scratch deleted them on every re-run, so carry any foreign assignments across.
-preserved_env() {
-  local file=$1 hook=$2 existing
-  [ -e "$file" ] || return 0
-  existing=$(jq -r --arg hook "$hook" '
-    [.hooks // {} | to_entries[] | .value[]? | .hooks[]? | .command // ""]
-    | map(select(contains($hook))) | first // ""
-  ' "$file" 2>/dev/null || printf '')
-  [ -n "$existing" ] || return 0
-  printf '%s' "$existing" \
-    | sed 's/"[^"]*"//g' \
-    | tr ' ' '\n' \
-    | grep -E '^[A-Za-z_][A-Za-z0-9_]*=.' \
-    | grep -v '^SESSION_JOURNAL_DIR=' \
-    | tr '\n' ' '
-}
-
 merge_hooks() {
   local file=$1 runtime=$2 start_matcher="*"
   [ "$runtime" = "codex" ] && start_matcher="startup|resume|clear|compact"
@@ -267,8 +350,8 @@ merge_hooks() {
   [ -e "$file" ] || printf '%s\n' '{}' > "$file"
 
   local pointer_env nudge_env pointer_command nudge_command
-  pointer_env=$(preserved_env "$file" session-journal-pointer.sh)
-  nudge_env=$(preserved_env "$file" session-journal-nudge.sh)
+  pointer_env=$(preserved_env "$file" SessionStart session-journal-pointer.sh)
+  nudge_env=$(preserved_env "$file" Stop session-journal-nudge.sh)
   [ -z "$pointer_env" ] || echo "Preserved environment overrides on the SessionStart command: $pointer_env"
   [ -z "$nudge_env" ] || echo "Preserved environment overrides on the Stop command: $nudge_env"
   pointer_command="${pointer_env}${GENERATED_PREFIX}\"$RUNTIME_ROOT/.claude/hooks/session-journal-pointer.sh\""

@@ -129,16 +129,22 @@ teardown() { teardown_workspace; }
   [ ! -d "$SESSION_JOURNAL_DIR" ]
 }
 
+# The gate can only assert what git can prove: the journal has uncommitted
+# content changes, or it rode along in the most recent commit. A journal that did
+# neither, while tracked work piled up, has not recorded that work -- and a bare
+# `touch` must not be able to claim otherwise.
 @test "a touched but unchanged journal does not satisfy the gate when other work happened" {
   setup_git_workspace
   journal="$(write_journal)"
   commit_workspace "baseline"
   printf 'v2\n' > "$TEST_ROOT/src/app.txt"
+  commit_workspace "work without touching the journal"
+  printf 'v3\n' > "$TEST_ROOT/src/app.txt"
   touch "$journal"
 
   run bash -c "printf '%s' '{\"stop_hook_active\":false}' | '$BATS_TEST_DIRNAME/../hooks/session-journal-nudge.sh'"
   [ "$status" -eq 2 ]
-  [[ "$output" == *"timestamp moved but its content did not"* ]]
+  [[ "$output" == *"does not record the tracked changes"* ]]
 }
 
 @test "a genuinely edited journal satisfies the gate" {
@@ -182,4 +188,37 @@ teardown() { teardown_workspace; }
 
   run bash -c "printf '%s' '{\"stop_hook_active\":false}' | '$BATS_TEST_DIRNAME/../hooks/session-journal-nudge.sh'"
   [ "$status" -eq 0 ]
+}
+
+@test "a journal committed alongside the work is not treated as unmoved" {
+  setup_git_workspace
+  journal="$(write_journal)"
+  commit_workspace "baseline"
+  printf 'v2\n' > "$TEST_ROOT/src/app.txt"
+  printf -- '- recorded the change\n' >> "$journal"
+  commit_workspace "work and journal together"
+  printf 'v3\n' > "$TEST_ROOT/src/app.txt"
+
+  run bash -c "printf '%s' '{\"stop_hook_active\":false}' | '$BATS_TEST_DIRNAME/../hooks/session-journal-nudge.sh'"
+  [ "$status" -eq 0 ]
+}
+
+@test "untracked scratch files are not work the journal owes an entry for" {
+  setup_git_workspace
+  write_journal >/dev/null
+  commit_workspace "baseline"
+  printf 'junk' > "$TEST_ROOT/.DS_Store"
+
+  run bash -c "printf '%s' '{\"stop_hook_active\":false}' | '$BATS_TEST_DIRNAME/../hooks/session-journal-nudge.sh'"
+  [ "$status" -eq 0 ]
+}
+
+@test "a slow or oversized stdin payload cannot stall the hook" {
+  journal="$(write_journal)"
+  make_stale "$journal"
+  start="$(date +%s)"
+  run bash -c "{ printf '{\n'; i=0; while [ \$i -lt 5000 ]; do printf '  \"pad%s\": 1,\n' \"\$i\"; i=\$((i+1)); done; printf '  \"stop_hook_active\": false\n}\n'; } | '$BATS_TEST_DIRNAME/../hooks/session-journal-nudge.sh'"
+  elapsed=$(( $(date +%s) - start ))
+  [ "$status" -eq 2 ]
+  [ "$elapsed" -lt 15 ]
 }

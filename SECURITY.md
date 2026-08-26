@@ -24,6 +24,13 @@ It is a continuity aid, not a credential scanner:
 - It scans one file, not your repository.
 - It is a shape matcher. It will miss a secret that does not look like one — a
   passphrase in prose, a credential split across lines, an encoded blob.
+- For `key: value` assignments it inspects the value, and deliberately exempts
+  two classes so that redacting does not re-trigger the block: values shorter
+  than 8 characters, and values whose first word says where the secret lives
+  rather than what it is (`redacted`, `stored-…`, `see-…`, `$ENV_VAR`,
+  `<anything>`). A real credential that happens to start with one of those words
+  will be missed. Surrounding quotes, backticks and markdown emphasis are
+  stripped before the check, so decoration does not hide a value.
 - It fails open on anything it cannot parse, because a Stop hook that blocks
   forever is worse than one that misses.
 - The `<!-- journal-secrets-ok -->` escape suppresses a line entirely. It exists

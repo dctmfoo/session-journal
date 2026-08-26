@@ -19,7 +19,7 @@ bats tests
 
 | Gate | Claim |
 | --- | --- |
-| bats-core | <!-- bats-count -->95<!-- /bats-count --> checks, all passing |
+| bats-core | <!-- bats-count -->123<!-- /bats-count --> checks, all passing |
 | Shellcheck and `bash -n` | clean for every shell entrypoint |
 | Self-check | `./doctor.sh .` passes against this repository's own installation |
 | Secrets | the runtime guard runs over every tracked journal in CI, plus a pinned full-history gitleaks scan |

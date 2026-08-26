@@ -56,8 +56,10 @@ Two behaviour changes are worth knowing about before you upgrade:
   time, leaving no loop protection at all.
 - **The one-shot marker expires.** It outlived the session that armed it and
   silently swallowed the next session's first nudge.
-- **A bare `touch` no longer satisfies the freshness gate** when other files in
-  the repository changed and the journal did not.
+- **A bare `touch` no longer satisfies the freshness gate** when tracked files
+  changed and the journal did not. Untracked scratch files are ignored, and a
+  journal committed alongside its work counts as recorded, so the gate does not
+  punish the workflow this project teaches.
 - **The installer refuses before it acts.** An unmatched sentinel used to
   produce "refusing to modify it" *after* both hooks were copied and merged
   live, leaving enforcement wired up with no instruction block, plus a stray
@@ -65,7 +67,9 @@ Two behaviour changes are worth knowing about before you upgrade:
 - **Re-running the installer preserves your adaptations.** It previously deleted
   the `JOURNAL_FRESH_SECS` override, the adapted sessions README, and any local
   edit inside the instruction block — all three of which `ADOPT.md` instructs
-  the adopting agent to write.
+  the adopting agent to write. A rerun without `--sessions-dir` also keeps the
+  journal directory already configured, instead of reverting to the default and
+  leaving every existing journal unreachable.
 - **The journal template is installed.** Both the pointer hook and the generated
   README told agents to start from a local template that nothing ever placed, so
   first journals were written from memory. This was the root cause of heading
@@ -104,10 +108,10 @@ Two behaviour changes are worth knowing about before you upgrade:
 - The journal template asks for evidence a reader can re-run — a command, a
   test, a CI URL — rather than a count frozen at write time. This project's own
   verification record had drifted for exactly that reason.
-- CI pins its actions by commit SHA, runs the suite under `bash 3.2` as well as
-  the system bash, runs the secrets guard over *every* tracked journal rather
-  than only the newest, and checks that the documentation's own claims still
-  match the code.
+- CI pins its actions by commit SHA, asserts on macOS that the interpreter the
+  hooks' shebang selects really is bash 3.2, runs the secrets guard over *every*
+  tracked journal rather than only the newest, and checks that the
+  documentation's own claims still match the code.
 
 ## 1.0.0
 

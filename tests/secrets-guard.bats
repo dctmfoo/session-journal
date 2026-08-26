@@ -116,3 +116,40 @@ assert_secret_passes() {
   run bash -c "printf '%s' '{\"stop_hook_active\":false}' | '$BATS_TEST_DIRNAME/../hooks/session-journal-nudge.sh'"
   [ "$status" -eq 0 ]
 }
+
+# Regressions from the adversarial review of 1.1.0: the value inspector must not
+# treat decoration as evidence of a placeholder, and must not stop at the first
+# credential on a line.
+@test "a double-quoted credential is caught" { assert_secret_blocks 'PASSWORD="S3cr3tP4ssw0rdXyz"'; }
+@test "a single-quoted credential is caught" { assert_secret_blocks "password: 'S3cr3tP4ssw0rdXyz'"; }
+@test "a backticked credential is caught" { assert_secret_blocks 'password: `S3cr3tP4ssw0rdXyz`'; }
+@test "a markdown-emphasised credential is caught" { assert_secret_blocks 'password: **S3cr3tP4ssw0rdXyz**'; }
+@test "a credential with shell punctuation is caught" { assert_secret_blocks 'DB password: P@ssw0rd!Secret1'; }
+@test "a quoted export assignment is caught" { assert_secret_blocks 'export API_KEY="AIzaSyC9x8v7b6n5m4k3j2h1g0f"'; }
+
+@test "a second credential is caught even when the first is redacted" {
+  assert_secret_blocks 'api_key: <redacted>, password: S3cr3tP4ssw0rdXyz'
+}
+
+@test "digest context still exempts an inflected keyword" {
+  journal="$(write_journal)"
+  printf '%s\n' 'Verified with sha256sum:' \
+    '0123456789abcdef0123456789abcdef01234567' >> "$journal"
+  run bash -c "printf '%s' '{\"stop_hook_active\":false}' | '$BATS_TEST_DIRNAME/../hooks/session-journal-nudge.sh'"
+  [ "$status" -eq 0 ]
+}
+
+@test "digest context still exempts a committed revision" {
+  journal="$(write_journal)"
+  printf '%s\n' 'Committed as' '0123456789abcdef0123456789abcdef01234567' >> "$journal"
+  run bash -c "printf '%s' '{\"stop_hook_active\":false}' | '$BATS_TEST_DIRNAME/../hooks/session-journal-nudge.sh'"
+  [ "$status" -eq 0 ]
+}
+
+@test "an elided example value is not mistaken for a credential" {
+  assert_secret_passes 'api_key: sk-live-...'
+}
+
+@test "a truncated value with a trailing separator is not mistaken for a credential" {
+  assert_secret_passes 'password: hunter2-'
+}
