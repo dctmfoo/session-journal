@@ -1,6 +1,30 @@
 # Verification record
 
-Verified 2026-07-13 on macOS. This document records observed behavior, not just intended configuration.
+This document records observed behavior, not just intended configuration. It has
+two parts: a **dated adoption record** that is a snapshot and is never rewritten,
+and a **current gates** section that must stay true today. Counts inside the
+dated record describe the revision they were taken at; counts in the current
+section are checked by `tests/docs.bats`, so they cannot quietly rot.
+
+## Current gates
+
+Run these to reproduce the claim rather than trusting a number frozen here:
+
+```bash
+bash -n hooks/*.sh install.sh doctor.sh extras/spine-promotion/*.sh
+shellcheck hooks/*.sh install.sh doctor.sh extras/spine-promotion/*.sh
+bats tests
+./doctor.sh .
+```
+
+| Gate | Claim |
+| --- | --- |
+| bats-core | <!-- bats-count -->95<!-- /bats-count --> checks, all passing |
+| Shellcheck and `bash -n` | clean for every shell entrypoint |
+| Self-check | `./doctor.sh .` passes against this repository's own installation |
+| Secrets | the runtime guard runs over every tracked journal in CI, plus a pinned full-history gitleaks scan |
+
+## Adoption record — 2026-07-13, macOS
 
 ## Automated suites
 
@@ -8,12 +32,12 @@ Verified 2026-07-13 on macOS. This document records observed behavior, not just 
 | --- | --- |
 | Shell syntax | `bash -n` passed for the installer, both core hooks, and the optional spine-promotion hook |
 | JSON syntax | Both hook snippets parsed with `jq` |
-| bats-core 1.13.0 | 38/38 checks passed |
+| bats-core 1.13.0 | 38/38 checks passed at that revision |
 | Installer lifecycle | Fresh install, merge preservation, idempotent rerun, portable custom journal path, Codex-only wiring, invalid-input refusal, and repeatable uninstall passed |
 | Secrets behavior | Credential and provider pattern classes, safe negatives, one-line allowlist, and guard-under-loop-protection passed |
 | Optional spine promotion | Empty, THIN, below-threshold, threshold, and configured-override cases passed |
 
-The first proof-first run intentionally had 25 failures because the hooks and installer did not exist yet. The suite grew to 38 checks during review; all pass after implementation and hardening.
+The first proof-first run intentionally had 25 failures because the hooks and installer did not exist yet. The suite grew to 38 checks during review; all passed after implementation and hardening. It has grown since: see **Current gates** above for the live count.
 
 ## Live Claude Code
 
@@ -75,7 +99,7 @@ Pre-publication result after the final review fix:
 - Customer and personal-trace grep: zero matches.
 - Manual review: all 28 tracked files read; examples are synthetic and no private source file was copied.
 - Shellcheck and `bash -n`: clean for every shell entrypoint.
-- bats-core: 38/38 passing, including review regressions for path traversal, portable relocation, malformed JSON, sentinel integrity, repeatable uninstall, and spine promotion.
+- bats-core: 38/38 passing at that revision, including review regressions for path traversal, portable relocation, malformed JSON, sentinel integrity, repeatable uninstall, and spine promotion.
 - Relocation fixture: a custom `docs/sessions/` install still resolved and returned valid pointer JSON after the target repo moved to a different absolute path containing spaces.
 - Structured code review: installer command injection/path escape and portability findings fixed; CI now repeats shellcheck, tracked-journal guarding, bats, and full-history gitleaks.
 
