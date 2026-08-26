@@ -107,3 +107,101 @@ teardown() { teardown_workspace; }
   run "$BATS_TEST_DIRNAME/../install.sh" "$TARGET" --codex --uninstall
   [ "$status" -eq 0 ]
 }
+
+@test "the journal template is installed so the hooks' instructions resolve" {
+  run "$BATS_TEST_DIRNAME/../install.sh" "$TARGET"
+  [ "$status" -eq 0 ]
+  [ -f "$TARGET/sessions/TEMPLATE.md" ]
+  grep -Fq '## Next step for a fresh agent' "$TARGET/sessions/TEMPLATE.md"
+  grep -Fq 'TEMPLATE.md' "$TARGET/sessions/README.md"
+}
+
+@test "the installed hooks carry a resolved version stamp" {
+  "$BATS_TEST_DIRNAME/../install.sh" "$TARGET" >/dev/null
+  version="$(cat "$BATS_TEST_DIRNAME/../VERSION")"
+  grep -Fq "session-journal $version" "$TARGET/.claude/hooks/session-journal-pointer.sh"
+  grep -Fq "session-journal $version" "$TARGET/.claude/hooks/session-journal-nudge.sh"
+  ! grep -Fq '<VERSION>' "$TARGET/.claude/hooks/session-journal-nudge.sh"
+}
+
+@test "rerunning preserves the adapted sessions README" {
+  "$BATS_TEST_DIRNAME/../install.sh" "$TARGET" >/dev/null
+  printf '%s\n' '- Local rule: cite the GATE-000 id.' >> "$TARGET/sessions/README.md"
+  run "$BATS_TEST_DIRNAME/../install.sh" "$TARGET"
+  [ "$status" -eq 0 ]
+  grep -Fq 'GATE-000' "$TARGET/sessions/README.md"
+}
+
+@test "rerunning preserves an adapted instruction block" {
+  "$BATS_TEST_DIRNAME/../install.sh" "$TARGET" >/dev/null
+  awk '{print} /<!-- session-journal:begin -->/{print "Local rule: link the tracker id."}' \
+    "$TARGET/CLAUDE.md" > "$TARGET/CLAUDE.md.new"
+  mv "$TARGET/CLAUDE.md.new" "$TARGET/CLAUDE.md"
+  run "$BATS_TEST_DIRNAME/../install.sh" "$TARGET"
+  [ "$status" -eq 0 ]
+  grep -Fq 'Local rule: link the tracker id.' "$TARGET/CLAUDE.md"
+  [ "$(grep -c '<!-- session-journal:begin -->' "$TARGET/CLAUDE.md")" -eq 1 ]
+}
+
+@test "rerunning preserves environment overrides on the generated commands" {
+  "$BATS_TEST_DIRNAME/../install.sh" "$TARGET" >/dev/null
+  jq '.hooks.Stop[0].hooks[0].command = ("JOURNAL_FRESH_SECS=900 " + .hooks.Stop[0].hooks[0].command)' \
+    "$TARGET/.claude/settings.json" > "$TARGET/settings.new"
+  mv "$TARGET/settings.new" "$TARGET/.claude/settings.json"
+  run "$BATS_TEST_DIRNAME/../install.sh" "$TARGET"
+  [ "$status" -eq 0 ]
+  jq -e '.hooks.Stop[0].hooks[0].command | startswith("JOURNAL_FRESH_SECS=900 ")' "$TARGET/.claude/settings.json" >/dev/null
+  [ "$(jq '.hooks.Stop | length' "$TARGET/.claude/settings.json")" -eq 1 ]
+}
+
+@test "--refresh-docs regenerates what a plain rerun preserves" {
+  "$BATS_TEST_DIRNAME/../install.sh" "$TARGET" >/dev/null
+  printf '%s\n' '- Local rule: cite the GATE-000 id.' >> "$TARGET/sessions/README.md"
+  run "$BATS_TEST_DIRNAME/../install.sh" "$TARGET" --refresh-docs
+  [ "$status" -eq 0 ]
+  ! grep -Fq 'GATE-000' "$TARGET/sessions/README.md"
+}
+
+@test "--plan-pointer makes the deterministic install agree with ADOPT.md about THIN mode" {
+  run "$BATS_TEST_DIRNAME/../install.sh" "$TARGET" --plan-pointer docs/plans/release.md
+  [ "$status" -eq 0 ]
+  grep -Fq 'docs/plans/release.md' "$TARGET/sessions/README.md"
+  grep -Fq 'docs/plans/release.md' "$TARGET/sessions/TEMPLATE.md"
+}
+
+@test "an unmatched sentinel refuses before anything is written" {
+  printf '# Project\n\n<!-- session-journal:begin -->\nstray\n' > "$TARGET/CLAUDE.md"
+  before="$(cksum < "$TARGET/CLAUDE.md")"
+  run "$BATS_TEST_DIRNAME/../install.sh" "$TARGET"
+  [ "$status" -eq 65 ]
+  [ ! -e "$TARGET/.claude/settings.json" ]
+  [ ! -e "$TARGET/.claude/hooks/session-journal-nudge.sh" ]
+  [ ! -e "$TARGET/sessions/README.md" ]
+  [ -z "$(find "$TARGET" -name '*.session-journal.tmp')" ]
+  [ "$(cksum < "$TARGET/CLAUDE.md")" = "$before" ]
+}
+
+@test "installing into a subdirectory of a git repository is refused" {
+  mkdir -p "$TARGET/nested"
+  run "$BATS_TEST_DIRNAME/../install.sh" "$TARGET/nested"
+  [ "$status" -eq 65 ]
+  [[ "$output" == *"not its root"* ]]
+  [ ! -e "$TARGET/nested/.claude/settings.json" ]
+}
+
+@test "a journal directory that escapes the repository is refused" {
+  mkdir -p "$TEST_ROOT/outside"
+  ln -s "$TEST_ROOT/outside" "$TARGET/journals"
+  run "$BATS_TEST_DIRNAME/../install.sh" "$TARGET" --sessions-dir journals
+  [ "$status" -eq 65 ]
+  [ -z "$(find "$TEST_ROOT/outside" -type f)" ]
+}
+
+@test "uninstall refuses on an unmatched sentinel before removing hooks" {
+  "$BATS_TEST_DIRNAME/../install.sh" "$TARGET" >/dev/null
+  printf '\n<!-- session-journal:begin -->\n' >> "$TARGET/CLAUDE.md"
+  run "$BATS_TEST_DIRNAME/../install.sh" "$TARGET" --uninstall
+  [ "$status" -eq 65 ]
+  [ -x "$TARGET/.claude/hooks/session-journal-nudge.sh" ]
+  [ "$(jq '.hooks.Stop | length' "$TARGET/.claude/settings.json")" -eq 1 ]
+}
