@@ -1,0 +1,6 @@
+interface:
+  display_name: "Session Journal"
+  short_description: "Adopt, adapt, and operate session-bound journals: pick or create this session's journal, lead and worker roles, migration, and topic recall."
+  default_prompt: "Use $session-journal to adopt session journals in this project, to decide which journal this session continues or creates, to act on a session-journal hook message, or to recall a topic from earlier sessions."
+policy:
+  allow_implicit_invocation: true
