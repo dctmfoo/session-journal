@@ -43,7 +43,9 @@ sessions, and several hundred journals. Its generic findings, in the order they 
   loop is needed. The rules are retuned for compound key names (`dbPassword=`, `SERVICE_API_KEY:`), prose, table
   cells, URL credentials, and CLI flags. The bare-hexadecimal rule is gone.
 - **Sessions end by marking an ACTIVE journal PAUSED**, and record themselves on a `**Sessions:**` line. `PAUSED`
-  joins the status vocabulary. `JOURNAL_PAUSE_ON_END=0` turns this off.
+  joins the status vocabulary. `JOURNAL_PAUSE_ON_END=0` turns this off. A journal that is committed and unchanged
+  is never edited at session end, because that would leave a change nobody asked for: the stamp waits in local state
+  until the next session that changes the journal ends, or until `sweep`.
 - **`SESSION_JOURNAL_DIR` is relative to the main checkout.** The installer rewrites the v1 absolute form.
 
 ### Removed

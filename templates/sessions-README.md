@@ -35,7 +35,7 @@ Hooks bind each journal to the session that writes it (`.claude/hooks/session-jo
 - Unrelated work, or a journal past about 40 KB: create a new journal; link it with `**Continues:**`.
 - After context compaction: read the bound journal and its live plan before acting.
 - Keep `**Status:**` to one line; move state history to `## Change log`.
-- Set `**Status:** DONE` when the work is finished. A session that ends with the journal still `ACTIVE` marks it `PAUSED`; the `**Sessions:**` line is maintained by the hook.
+- Set `**Status:** DONE` when the work is finished. A session that ends with the journal still `ACTIVE` marks it `PAUSED`; the `**Sessions:**` line is maintained by the hook. If the journal was committed and unchanged, the hook leaves the file alone and writes those lines later, with the next change to it or on `sweep`.
 - Workers started with `JOURNAL_ROLE=worker` never write journals; their lead records the outcome.
 
 ## Sessions that need no journal

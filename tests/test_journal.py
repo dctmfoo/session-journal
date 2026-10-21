@@ -549,6 +549,49 @@ class Lifecycle(Lab):
         self.assertIn('2026-01-09-0900-flaky-upload-2.md', self.cli('reconstruct', '2026-01-08-1900-flaky-upload.md'))
         self.assertIn('flaky-upload', self.cli('find', 'flaky', 'upload'))
 
+    def test_a_committed_journal_is_not_edited_after_the_session_ends(self):
+        """Live Claude run: a session that committed everything left its journal modified by SessionEnd."""
+        name = '2026-01-08-1920-clean.md'
+        t = Transcript(os.path.join(self.tmp, 'cl.jsonl'))
+        self.hook('SessionStart', 'c0c0c0c0-1', source='startup', transcript_path=t.path)
+        t.human('x')
+        self.write_journal('c0c0c0c0-1', t, name)
+        sh('git', 'add', '-A', cwd=self.repo)
+        sh('git', 'commit', '-qm', 'work and journal', cwd=self.repo)
+        before = open(os.path.join(self.jdir, name)).read()
+        self.hook('SessionEnd', 'c0c0c0c0-1', reason='other')
+        self.assertEqual(open(os.path.join(self.jdir, name)).read(), before)
+        self.assertEqual(sh('git', 'status', '--porcelain', cwd=self.repo), '')
+        self.assertIn(f'{name} [PAUSED (session ended)]', self.cli('candidates'))
+        # The next session that changes the journal anyway carries the pending line when it ends.
+        t2 = Transcript(os.path.join(self.tmp, 'cl2.jsonl'))
+        self.hook('SessionStart', 'c1c1c1c1-2', source='startup', transcript_path=t2.path)
+        t2.human('continue')
+        self.write_journal('c1c1c1c1-2', t2, name, text=before.replace('- working', '- working further'))
+        self.assertNotIn('PAUSED (session ended)', self.cli('candidates'), 'a later write supersedes the pending pause')
+        self.hook('SessionEnd', 'c1c1c1c1-2', reason='other')
+        text = open(os.path.join(self.jdir, name)).read()
+        self.assertIn('c0c0c0c0', text)
+        self.assertIn('c1c1c1c1', text)
+        self.assertIn('**Status:** PAUSED', text)
+        self.assertNotIn('stamp_pending', json.dumps(self.lease('c0c0c0c0-1')))
+
+    def test_sweep_applies_pending_stamps(self):
+        name = '2026-01-08-1930-swept.md'
+        t = Transcript(os.path.join(self.tmp, 'sw.jsonl'))
+        self.hook('SessionStart', 'c2c2c2c2-1', source='startup', transcript_path=t.path)
+        t.human('x')
+        self.write_journal('c2c2c2c2-1', t, name)
+        sh('git', 'add', '-A', cwd=self.repo)
+        sh('git', 'commit', '-qm', 'j', cwd=self.repo)
+        self.hook('SessionEnd', 'c2c2c2c2-1', reason='other')
+        self.assertIn(f'would stamp {self.jrel}/{name}', self.cli('sweep', '--dry-run'))
+        self.assertIn('**Status:** ACTIVE', open(os.path.join(self.jdir, name)).read())
+        self.cli('sweep')
+        text = open(os.path.join(self.jdir, name)).read()
+        self.assertIn('**Status:** PAUSED', text)
+        self.assertIn('c2c2c2c2', text)
+
     def test_pause_on_end_can_be_turned_off(self):
         t = Transcript(os.path.join(self.tmp, 'pe.jsonl'))
         self.hook('SessionStart', '5c5c5c5c-1', source='startup', transcript_path=t.path)

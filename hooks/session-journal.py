@@ -636,14 +636,20 @@ def candidates(ctx, lease, limit=5, first=None):
     for line in git('status', '--porcelain', '--', ctx.jdir, cwd=ctx.main).splitlines():
         dirty.add(os.path.basename(line[3:].strip().strip('"')))
     session_writes = {}
+    paused = {}                                    # journal -> end time of a session whose PAUSED stamp is pending
     for l in ctx.leases():
         for w in l.get('writes') or []:
             session_writes[w[0]] = max(session_writes.get(w[0], 0), w[1])
+        if l.get('stamp_pending') == 'pause' and l.get('journal'):
+            paused[l['journal']] = max(paused.get(l['journal'], 0), l.get('ended') or 0)
     rows = []
     for p in ctx.journals()[-300:]:
         c = card(ctx, os.path.basename(p))
         if not c or c['status'] in CLOSED:
             continue
+        if c['status'] == 'ACTIVE' and c['journal'] in paused and \
+                paused[c['journal']] >= session_writes.get(c['journal'], 0):
+            c['label'] = 'PAUSED (session ended)'      # the header still says ACTIVE until it is stamped
         owners = ctx.owners(c['journal'], me=lease)
         last = session_writes.get(c['journal']) or c['mtime']
         score = -((time.time() - last) / 3600.0)
@@ -1154,6 +1160,34 @@ def stamp_session_line(ctx, name, lease, status=None):
         os.replace(tmp, p)
 
 
+AUTO_PAUSED = 'PAUSED (auto: session ended without DONE)'
+
+
+def clean_in_git(ctx, name):
+    """True when git tracks the journal and it has no uncommitted change, so a hook edit would create one."""
+    p = ctx.jpath(name)
+    return bool(git('ls-files', '--', p, cwd=ctx.main)) and not git('status', '--porcelain', '--', p, cwd=ctx.main)
+
+
+def settle_stamps(ctx, name, own=None, own_status=None, pending_status=False):
+    """Write the header lines ended sessions left pending for this journal, oldest first, then this session's own.
+    A pending PAUSED is applied only by `sweep` (pending_status) and only from the latest ended session: a later
+    session that wrote the journal has superseded an earlier pause."""
+    pend = sorted((l for l in ctx.leases() if l.get('journal') == name and l.get('stamp_pending')
+                   and l.get('sid') != (own or {}).get('sid')), key=lambda l: l.get('ended') or 0)
+    for i, l in enumerate(pend):
+        last = i == len(pend) - 1 and own is None
+        stamp_session_line(ctx, name, l, status=AUTO_PAUSED if pending_status and last and
+                           l.get('stamp_pending') == 'pause' else None)
+        with ctx.lock():
+            cur = ctx.lease(l['sid']) or l
+            cur.pop('stamp_pending', None)
+            ctx.save_lease(cur, touch=False)
+    if own is not None:
+        stamp_session_line(ctx, name, own, status=own_status)
+    return len(pend)
+
+
 def on_session_end(ctx, inp):
     reason = inp.get('reason') or 'other'
     with ctx.lock():
@@ -1163,12 +1197,22 @@ def on_session_end(ctx, inp):
         lease['ended'] = time.time()
         lease['end_reason'] = reason
         ctx.save_lease(lease)
+    deferred = False
     if lease.get('journal') and lease['role'] != 'worker' and not ctx.owners(lease['journal']):
         # /clear starts a new session in the same window, which usually carries on: record it, keep the status.
         pause = reason != 'clear' and os.environ.get('JOURNAL_PAUSE_ON_END', '1') not in ('0', 'false', 'no')
-        stamp_session_line(ctx, lease['journal'], lease,
-                           status='PAUSED (auto: session ended without DONE)' if pause else None)
-    ctx.trace(ev='SessionEnd', sid=lease['sid'], journal=lease.get('journal'), reason=reason)
+        if clean_in_git(ctx, lease['journal']):
+            # Everything was committed. Editing the journal now would leave a change nobody asked for after the
+            # agent has gone, so the header lines wait for the next session that changes the journal anyway (its
+            # own SessionEnd), or for `sweep`. Candidates show the pause meanwhile.
+            with ctx.lock():
+                cur = ctx.lease(lease['sid']) or lease
+                cur['stamp_pending'] = 'pause' if pause else 'record'
+                ctx.save_lease(cur, touch=False)
+            deferred = True
+        else:
+            settle_stamps(ctx, lease['journal'], own=lease, own_status=AUTO_PAUSED if pause else None)
+    ctx.trace(ev='SessionEnd', sid=lease['sid'], journal=lease.get('journal'), reason=reason, deferred=deferred)
     return None
 
 
@@ -1442,6 +1486,13 @@ def cmd_sweep(ctx, args):
                     ctx.save_lease(l, touch=False)
                 if l.get('journal') and not ctx.owners(l['journal']):
                     stamp_session_line(ctx, l['journal'], l)
+    pending = sorted({l['journal'] for l in ctx.leases() if l.get('stamp_pending') and l.get('journal')})
+    for n in pending:
+        if ctx.owners(n) or not os.path.exists(ctx.jpath(n)):
+            continue
+        changes.append(f'stamp {ctx.show(n)} (sessions that ended with everything committed)')
+        if not dry:
+            settle_stamps(ctx, n, pending_status=True)
     gdates = last_commit_dates(ctx) if by_git else {}
     if by_git and not gdates and git('ls-files', '--', ctx.jdir, cwd=ctx.main):
         print('sweep --by-git: git log over the journal directory returned nothing (timeout or error); refusing to '

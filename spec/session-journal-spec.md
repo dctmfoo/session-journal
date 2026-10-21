@@ -66,6 +66,11 @@ A session that ends while its journal is still `ACTIVE` sets it to `PAUSED`, unl
 journal or another live session owns it. Ending with `/clear` records the session but leaves the status alone,
 because the same window usually carries on.
 
+A hook never creates an uncommitted change in a journal that has none. When the journal is committed and unchanged
+at session end, the `**Sessions:**` line and the `PAUSED` status wait in local state. Candidates show the journal as
+`PAUSED (session ended)` meanwhile. The lines are written by the next session that ends after changing the journal
+anyway, or by `sweep`. A later session's write supersedes a pending pause.
+
 ## Binding: which journal is this session's
 
 A journal belongs to the sessions that write it. Picking "the newest journal" is not a selection rule; it is the
