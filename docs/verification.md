@@ -36,8 +36,17 @@ A snapshot, never rewritten. Python 3.14 and Claude Code 2.1.306 / Codex CLI 0.1
   scratch v1 installation, which it migrated. `./doctor.sh` passed on each.
 - Simulated sessions piped hook JSON into the installed script: start, edit, commit, Stop nudge, journal write,
   Stop quiet, SessionEnd.
-- Live Claude Code and Codex sessions against 2.0 were **not** exercised in this record; the hook input and output
-  shapes were checked against each runtime's published hook reference.
+- **Live Claude Code 2.1.306** (headless `claude -p`, Haiku, scratch repository with a 2.0 install): the stream
+  recorded `hook_started`/`hook_response` for SessionStart, PreToolUse, PostToolUse and Stop. The hook trace showed
+  `SessionStart` → `bind` (the agent's journal write) → `stop: fresh` → `SessionEnd`, which stamped the journal's
+  `**Sessions:**` line and set it `PAUSED`. In the session that built this release, the installed PreToolUse hook
+  also denied a journal write by a `JOURNAL_ROLE=worker` session, as designed.
+- **Live Codex CLI 0.163.0** (`codex exec`, scratch repository, `--dangerously-bypass-hook-trust` for that one
+  invocation): PostToolUse recorded the `apply_patch` edit and the `git commit` under Codex's turn id; Stop nudged
+  once ("this turn landed work but this session has no journal yet"); the continuation's Stop was skipped as
+  `already-nudged`; SessionEnd fired. Codex's own transcript is not parsed: the hooks' turn record carried it.
+- Not exercised live: IN USE between two concurrent live sessions, `/clear`, and forks. The scenario suite covers
+  them with synthetic hook input.
 
 ## Adoption record — 2026-07-13, macOS (1.0, shell hooks)
 
