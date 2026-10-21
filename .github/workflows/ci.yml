@@ -25,53 +25,27 @@ jobs:
         run: brew install shellcheck
       - name: Validate shell syntax
         run: |
-          bash -n hooks/session-journal-pointer.sh
-          bash -n hooks/session-journal-nudge.sh
           bash -n extras/spine-promotion/journal-spine-promotion-nudge.sh
           bash -n install.sh
           bash -n doctor.sh
       - name: Run shellcheck
-        run: shellcheck hooks/*.sh extras/spine-promotion/*.sh install.sh doctor.sh
+        run: shellcheck extras/spine-promotion/*.sh install.sh doctor.sh
+      - name: Run the hook scenario tests
+        # The runner's python3; the script itself is also checked to parse
+        # under the oldest supported interpreter's grammar (3.8).
+        run: |
+          python3 --version
+          python3 -c "import ast; ast.parse(open('hooks/session-journal.py').read(), feature_version=(3, 8))"
+          python3 -m unittest discover -s tests -p 'test_*.py'
       - name: Run bats suites
         run: bats tests
-      - name: Exercise the hooks under the bash the shebang selects
-        # The hooks advertise bash 3.2 compatibility -- the version macOS still
-        # ships -- and the selection defect lived precisely in bash 3.2's
-        # whole-second `-nt` comparison. `bats tests` invokes every script by
-        # path, so its shebang picks /bin/bash; assert that is really 3.2 here
-        # rather than claiming coverage a separate job would not add.
-        if: runner.os == 'macOS'
-        run: |
-          /bin/bash --version | head -n 1
-          /bin/bash --version | head -n 1 | grep -q 'version 3\.2' \
-            || echo "note: /bin/bash is not 3.2 on this runner; the 3.2 claim is unverified here"
-          /bin/bash -n hooks/session-journal-pointer.sh
-          /bin/bash -n hooks/session-journal-nudge.sh
       - name: Self-check this repository's own installation
         run: ./doctor.sh .
-      - name: Check every tracked journal with the runtime secrets guard
-        # The hook deliberately scans only the newest journal, which is the right
-        # contract at runtime and the wrong one for a repository-wide gate. Older
-        # journals are history a reader still trusts, so CI walks all of them.
-        run: |
-          set -euo pipefail
-          shopt -s nullglob
-          status=0
-          for journal in sessions/*.md; do
-            case "$(basename "$journal")" in README.md|TEMPLATE.md) continue ;; esac
-            scratch="$(mktemp -d)"
-            mkdir -p "$scratch/sessions"
-            cp "$journal" "$scratch/sessions/"
-            if ! printf '%s' '{"stop_hook_active":false}' \
-              | CLAUDE_PROJECT_DIR="$scratch" SESSION_JOURNAL_DIR="$scratch/sessions" \
-                JOURNAL_FRESH_SECS=999999999 SESSION_JOURNAL_SKIP=1 \
-                hooks/session-journal-nudge.sh >/dev/null; then
-              echo "::error file=$journal::secret-shaped content in $journal"
-              status=1
-            fi
-            rm -rf "$scratch"
-          done
-          exit "$status"
+      - name: Check every tracked journal for credential shapes
+        # The hook checks each journal write as it happens; CI re-checks every
+        # tracked journal, because older journals are history a reader still
+        # trusts. Line numbers and rule names only, never values.
+        run: python3 hooks/session-journal.py scan sessions/2*.md
 
   secrets:
     runs-on: ubuntu-latest

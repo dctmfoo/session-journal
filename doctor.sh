@@ -1,12 +1,10 @@
 #!/bin/bash
 # Re-runnable self-check for an adopted session-journal installation.
 #
-# ADOPT.md Phase C is a verification matrix the installing agent runs once, at
-# adoption time, and then nobody can run again. Hooks that stop firing are
-# silent by construction: a SessionStart hook that never runs looks exactly like
-# a session with no journal, and a Stop hook that never runs looks exactly like
-# a journal that is always fresh. This script turns that one-time ritual into
-# something a teammate, a CI job, or a suspicious agent can run at any time.
+# Hooks that stop firing are silent by construction: a SessionStart hook that
+# never runs looks exactly like a session with no journal, and a Stop hook that
+# never runs looks exactly like a journal that is always up to date. This
+# script lets a teammate, a CI job, or a suspicious agent check at any time.
 #
 # Exit 0 when every check passes, 1 when any check fails.
 
@@ -26,139 +24,96 @@ note() { printf '     %s\n' "$1"; }
 echo "session-journal doctor — $TARGET"
 echo
 
-# --- Where are the journals? ------------------------------------------------
-
 SETTINGS="$TARGET/.claude/settings.json"
 CODEX_SETTINGS="$TARGET/.codex/hooks.json"
-SESSIONS_REL="sessions"
-STOP_COMMAND=""
-START_COMMAND=""
+SCRIPT="$TARGET/.claude/hooks/session-journal.py"
+EVENTS="SessionStart UserPromptSubmit PreToolUse PostToolUse Stop SessionEnd"
+HAVE_JQ=false
+command -v jq >/dev/null 2>&1 && HAVE_JQ=true
 
-# The event matters, not just the presence of the string. A command registered
-# under some other event -- or left behind by a hand-edit -- must not be reported
-# as a working SessionStart or Stop hook.
+# The command registered for an event in a settings file, if it runs the script.
+# The event matters, not just the presence of the string: a command registered
+# under some other event must not be reported as a working hook.
 read_command() {
-  local file=$1 event=$2 hook=$3
-  [ -e "$file" ] || return 0
-  command -v jq >/dev/null 2>&1 || return 0
-  jq -r --arg event "$event" --arg hook "$hook" '
+  local file=$1 event=$2
+  [ -e "$file" ] && [ "$HAVE_JQ" = true ] || return 0
+  jq -r --arg event "$event" '
     [(.hooks // {})[$event][]? | .hooks[]? | .command // ""]
-    | map(select(contains($hook))) | first // ""
+    | map(select(contains("session-journal.py"))) | first // ""
   ' "$file" 2>/dev/null || printf ''
 }
 
-for candidate_settings in "$SETTINGS" "$CODEX_SETTINGS"; do
-  [ -n "$START_COMMAND" ] || START_COMMAND=$(read_command "$candidate_settings" SessionStart session-journal-pointer.sh)
-  [ -n "$STOP_COMMAND" ] || STOP_COMMAND=$(read_command "$candidate_settings" Stop session-journal-nudge.sh)
-done
+# --- Tools -------------------------------------------------------------------
 
-# Anchor on the ")/" that closes the command substitution in the generated
-# prefix. A greedy ".*/" would swallow every leading path segment and report
-# `docs/sessions` as `sessions`, then fail three checks against a healthy repo.
-case "$STOP_COMMAND$START_COMMAND" in
-  *SESSION_JOURNAL_DIR=*)
-    SESSIONS_REL=$(printf '%s' "$STOP_COMMAND$START_COMMAND" \
-      | sed -n 's|.*SESSION_JOURNAL_DIR="[^"]*)/\([^"]*\)".*|\1|p' | head -n 1)
-    if [ -z "$SESSIONS_REL" ]; then
-      SESSIONS_REL=$(printf '%s' "$STOP_COMMAND$START_COMMAND" \
-        | sed -n 's|.*SESSION_JOURNAL_DIR="\([^"]*\)".*|\1|p' | head -n 1)
-      SESSIONS_REL=${SESSIONS_REL#"$TARGET"/}
-    fi
-    [ -n "$SESSIONS_REL" ] || SESSIONS_REL="sessions"
-    ;;
-esac
-SESSIONS_DIR="$TARGET/$SESSIONS_REL"
-
-# --- Installation ------------------------------------------------------------
-
-if command -v jq >/dev/null 2>&1; then
-  pass "jq is available"
+if [ "$HAVE_JQ" = true ]; then pass "jq is available"; else fail "jq is available" "settings cannot be inspected or merged without it"; fi
+if command -v python3 >/dev/null 2>&1 && python3 -c 'import sys; sys.exit(sys.version_info < (3, 8))' 2>/dev/null; then
+  pass "python3 3.8+ is available ($(python3 -c 'import platform; print(platform.python_version())'))"
 else
-  fail "jq is available" "settings cannot be inspected or merged without it"
+  fail "python3 3.8+ is available" "every hook command ends in '|| true', so without Python the hooks silently do nothing"
 fi
 
-if [ -e "$SETTINGS" ] || [ -e "$CODEX_SETTINGS" ]; then
-  for candidate_settings in "$SETTINGS" "$CODEX_SETTINGS"; do
-    [ -e "$candidate_settings" ] || continue
-    if ! command -v jq >/dev/null 2>&1; then continue; fi
-    if jq -e . "$candidate_settings" >/dev/null 2>&1; then
-      pass "${candidate_settings#"$TARGET"/} is valid JSON"
+# --- Wiring ------------------------------------------------------------------
+
+SESSIONS_REL=""
+RUNTIMES=0
+for candidate_settings in "$SETTINGS" "$CODEX_SETTINGS"; do
+  [ -e "$candidate_settings" ] || continue
+  label="${candidate_settings#"$TARGET"/}"
+  if [ "$HAVE_JQ" = true ] && ! jq -e . "$candidate_settings" >/dev/null 2>&1; then
+    fail "$label is valid JSON"
+    continue
+  fi
+  wired=""
+  missing=""
+  for event in $EVENTS; do
+    command=$(read_command "$candidate_settings" "$event")
+    if [ -n "$command" ]; then
+      wired="$wired $event"
+      case "$command" in *"|| true"*) ;; *) fail "$label $event command ends in '|| true'" "exit 2 from a missing interpreter would block the agent" ;; esac
+      if [ -z "$SESSIONS_REL" ]; then
+        SESSIONS_REL=$(printf '%s' "$command" | sed -nE 's/^(.* )?SESSION_JOURNAL_DIR=("[^"]*"|[^ "]+).*/\2/p' | head -n 1 | tr -d '"')
+      fi
     else
-      fail "${candidate_settings#"$TARGET"/} is valid JSON"
+      missing="$missing $event"
     fi
   done
-else
-  fail "a settings file exists" "no .claude/settings.json and no .codex/hooks.json"
-fi
-
-if [ -n "$START_COMMAND" ]; then
-  pass "a SessionStart hook is registered"
-else
-  fail "a SessionStart hook is registered" "no command referencing session-journal-pointer.sh"
-fi
-if [ -n "$STOP_COMMAND" ]; then
-  pass "a Stop hook is registered"
-else
-  fail "a Stop hook is registered" "no command referencing session-journal-nudge.sh"
-fi
-
-POINTER="$TARGET/.claude/hooks/session-journal-pointer.sh"
-NUDGE="$TARGET/.claude/hooks/session-journal-nudge.sh"
-for script in "$POINTER" "$NUDGE"; do
-  label="${script#"$TARGET"/}"
-  if [ ! -e "$script" ]; then
-    fail "$label exists"
-  elif [ ! -x "$script" ]; then
-    fail "$label is executable" "chmod +x $script"
-  elif ! bash -n "$script" 2>/dev/null; then
-    fail "$label parses"
+  [ -n "$wired" ] || continue
+  RUNTIMES=$((RUNTIMES + 1))
+  if [ -z "$missing" ]; then
+    pass "$label wires all six journal hooks"
   else
-    pass "$label is present, executable, and parses"
-    stamped=$(sed -n 's|.*session-journal \([0-9][0-9.]*\).*|\1|p' "$script" | head -n 1)
-    [ -z "$stamped" ] || note "version $stamped"
+    fail "$label wires all six journal hooks" "missing:$missing (re-run ./install.sh)"
+  fi
+  if [ "$HAVE_JQ" = true ] && jq -e '[.hooks // {} | .[]?[]? | .hooks[]? | .command // "" | select(test("session-journal-(pointer|nudge)\\.sh"))] | length > 0' "$candidate_settings" >/dev/null 2>&1; then
+    fail "$label carries no v1 hooks" "v1 pointer/nudge hooks still registered; re-run ./install.sh to migrate"
   fi
 done
+[ "$RUNTIMES" -gt 0 ] || fail "a runtime is wired" "no session-journal.py hooks in .claude/settings.json or .codex/hooks.json"
+case "$SESSIONS_REL" in *")/"*) SESSIONS_REL=${SESSIONS_REL##*)/} ;; esac
+[ -n "$SESSIONS_REL" ] || SESSIONS_REL="sessions"
+SESSIONS_DIR="$TARGET/$SESSIONS_REL"
 
-# The registered command must actually resolve. A hook installed into a
-# subdirectory of a git repository writes a runtime-relative path that points
-# somewhere that does not exist, and then fails silently forever.
-if [ -n "$STOP_COMMAND" ]; then
-  # Resolve the command's path the way the runtime would, without eval: the
-  # generated command is "$(git rev-parse --show-toplevel ... || pwd)/<tail>",
-  # so recompute that root here and rejoin it with the literal tail.
-  RUNTIME_ROOT=$(git -C "$TARGET" rev-parse --show-toplevel 2>/dev/null || printf '%s' "$TARGET")
-  resolved=$(printf '%s' "$STOP_COMMAND" | sed -n 's|.*)\(/[^"]*session-journal-nudge\.sh\)".*|\1|p' | head -n 1)
-  if [ -n "$resolved" ]; then
-    resolved="$RUNTIME_ROOT$resolved"
-  else
-    resolved=$(printf '%s' "$STOP_COMMAND" | sed -n 's|.*"\(/[^"]*session-journal-nudge\.sh\)".*|\1|p' | head -n 1)
-  fi
-  if [ -z "$resolved" ]; then
-    note "could not parse the Stop command path; skipping resolution check"
-  elif [ -x "$resolved" ]; then
-    pass "the registered Stop command resolves to an executable script"
-  else
-    fail "the registered Stop command resolves" "$resolved is missing or not executable"
-  fi
+if [ ! -e "$SCRIPT" ]; then
+  fail ".claude/hooks/session-journal.py exists"
+elif ! VERSION_OUT=$(python3 "$SCRIPT" version 2>/dev/null); then
+  fail ".claude/hooks/session-journal.py runs" "python3 $SCRIPT version failed"
+else
+  pass ".claude/hooks/session-journal.py runs (version $VERSION_OUT)"
 fi
+for legacy in session-journal-pointer.sh session-journal-nudge.sh; do
+  [ ! -e "$TARGET/.claude/hooks/$legacy" ] || note "v1 script .claude/hooks/$legacy is still on disk; ./install.sh removes it"
+done
 
 # --- Journal directory -------------------------------------------------------
 
 if [ -d "$SESSIONS_DIR" ]; then
   pass "journal directory exists ($SESSIONS_REL/)"
 else
-  fail "journal directory exists" "$SESSIONS_DIR is missing"
+  fail "journal directory exists" "$SESSIONS_DIR is missing; the hooks stay inactive without it"
 fi
-if [ -e "$SESSIONS_DIR/README.md" ]; then
-  pass "$SESSIONS_REL/README.md exists"
-else
-  fail "$SESSIONS_REL/README.md exists" "agents have no local contract to follow"
-fi
-if [ -e "$SESSIONS_DIR/TEMPLATE.md" ]; then
-  pass "$SESSIONS_REL/TEMPLATE.md exists"
-else
-  fail "$SESSIONS_REL/TEMPLATE.md exists" "the hooks tell agents to start from a template that is not installed"
-fi
+for doc in README.md TEMPLATE.md; do
+  if [ -e "$SESSIONS_DIR/$doc" ]; then pass "$SESSIONS_REL/$doc exists"; else fail "$SESSIONS_REL/$doc exists" "re-run ./install.sh"; fi
+done
 
 if command -v git >/dev/null 2>&1 && git -C "$TARGET" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   if git -C "$TARGET" check-ignore -q "$SESSIONS_DIR" 2>/dev/null; then
@@ -168,71 +123,70 @@ if command -v git >/dev/null 2>&1 && git -C "$TARGET" rev-parse --is-inside-work
   fi
   if [ -e "$SETTINGS" ] && git -C "$TARGET" check-ignore -q "$SETTINGS" 2>/dev/null; then
     fail "the hook settings are committed" ".claude/settings.json is gitignored, so only this machine runs the hooks"
-  elif [ -e "$SETTINGS" ]; then
-    if [ -n "$(git -C "$TARGET" status --porcelain -- "$SETTINGS" "$POINTER" "$NUDGE" 2>/dev/null)" ]; then
-      fail "the installation is committed" "commit .claude/ so teammates get the same hooks"
-    else
+  else
+    paths=""
+    for p in "$SETTINGS" "$CODEX_SETTINGS" "$SCRIPT"; do [ -e "$p" ] && paths="$paths $p"; done
+    # shellcheck disable=SC2086
+    if [ -n "$paths" ] && [ -n "$(git -C "$TARGET" status --porcelain -- $paths 2>/dev/null)" ]; then
+      fail "the installation is committed" "commit .claude/ (and .codex/) so teammates get the same hooks"
+    elif [ -n "$paths" ]; then
       pass "the installation is committed"
     fi
+  fi
+  if [ -d "$TARGET/.claude/state/session-journal" ] && \
+     [ -n "$(git -C "$TARGET" status --porcelain --untracked-files=all -- .claude/state/session-journal 2>/dev/null)" ]; then
+    fail "local hook state stays out of git" ".claude/state/session-journal/ shows in git status; restore its .gitignore ('*')"
   fi
 fi
 
 # --- Behaviour ---------------------------------------------------------------
+# Run the real hooks against a scratch state directory, so the check neither
+# reads nor disturbs the leases of sessions that are running right now.
 
-if [ -x "$POINTER" ]; then
-  if OUTPUT=$(CLAUDE_PROJECT_DIR="$TARGET" SESSION_JOURNAL_DIR="$SESSIONS_DIR" "$POINTER" 2>/dev/null); then
-    if command -v jq >/dev/null 2>&1 && ! printf '%s' "$OUTPUT" | jq -e '.hookSpecificOutput.hookEventName == "SessionStart"' >/dev/null 2>&1; then
-      fail "the pointer emits valid SessionStart JSON"
-    else
-      pass "the pointer emits valid SessionStart JSON"
-      case "$OUTPUT" in
-        *"No session journal exists"*) note "no journal yet: the next substantive session should create one" ;;
-        *"finished session"*) note "every journal is DONE: the next session starts fresh" ;;
-        *) note "$(printf '%s' "$OUTPUT" | sed -n 's|.*journal: \([^ .]*\.md\).*|pointing at \1|p' | head -n 1)" ;;
-      esac
-    fi
+if [ -e "$SCRIPT" ] && [ -d "$SESSIONS_DIR" ] && command -v python3 >/dev/null 2>&1; then
+  SCRATCH=$(mktemp -d "${TMPDIR:-/tmp}/session-journal-doctor.XXXXXX")
+  run_hook() {
+    printf '%s' "$2" | (cd "$TARGET" && env -u CLAUDE_PROJECT_DIR -u JOURNAL_ROLE -u SESSION_JOURNAL_DISABLE \
+      SESSION_JOURNAL_STATE_DIR="$SCRATCH" SESSION_JOURNAL_DIR="$SESSIONS_REL" \
+      python3 "$SCRIPT" hook "$1" 2>"$SCRATCH/stderr")
+  }
+  OUTPUT=$(run_hook SessionStart "{\"session_id\":\"doctor-check\",\"source\":\"startup\",\"cwd\":\"$TARGET\"}")
+  if printf '%s' "$OUTPUT" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["hookSpecificOutput"]["hookEventName"]=="SessionStart"' 2>/dev/null; then
+    pass "SessionStart returns journal context"
+    printf '%s' "$OUTPUT" | python3 -c '
+import json, sys
+ctx = json.load(sys.stdin)["hookSpecificOutput"]["additionalContext"]
+rows = [l.strip() for l in ctx.splitlines() if l.strip().startswith("- ")]
+print("     %d open candidate journal(s)%s" % (len(rows), (": first " + rows[0][2:].split(" [")[0]) if rows else ""))'
   else
-    fail "the pointer runs cleanly"
+    fail "SessionStart returns journal context" "$(head -c 200 "$SCRATCH/stderr")"
+  fi
+  OUTPUT=$(run_hook Stop "{\"session_id\":\"doctor-check\",\"stop_hook_active\":false,\"cwd\":\"$TARGET\"}")
+  if printf '%s' "$OUTPUT" | python3 -c 'import json,sys; json.load(sys.stdin)' 2>/dev/null; then
+    pass "Stop returns JSON and does not nudge a turn that landed nothing"
+    case "$OUTPUT" in *'"block"'*) fail "a read-only turn is not nudged" "$OUTPUT" ;; esac
+  else
+    fail "Stop returns JSON" "got: $(printf '%s' "$OUTPUT" | head -c 200)"
+  fi
+  if SCAN=$(cd "$TARGET" && env -u CLAUDE_PROJECT_DIR SESSION_JOURNAL_STATE_DIR="$SCRATCH" SESSION_JOURNAL_DIR="$SESSIONS_REL" python3 "$SCRIPT" scan 2>&1); then
+    pass "no journal carries credential-shaped content"
+  else
+    fail "no journal carries credential-shaped content" "$(printf '%s' "$SCAN" | head -n 5 | tr '\n' ' ')"
+  fi
+  rm -rf "${SCRATCH:?}"
+fi
+
+if [ -d "$TARGET/.claude/state/session-journal" ] && command -v python3 >/dev/null 2>&1 && [ -e "$SCRIPT" ]; then
+  errors=$(cd "$TARGET" && env -u CLAUDE_PROJECT_DIR SESSION_JOURNAL_DIR="$SESSIONS_REL" python3 "$SCRIPT" health 2>/dev/null \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin).get("hook_errors", 0))' 2>/dev/null || printf '?')
+  if [ "$errors" = "0" ]; then
+    pass "the hooks have logged no errors on this machine"
+  else
+    fail "the hooks have logged no errors on this machine" "$errors error(s); see .claude/state/session-journal/events.jsonl"
   fi
 fi
 
-if [ -x "$NUDGE" ]; then
-  STATUS=0
-  printf '%s' '{"stop_hook_active":true}' \
-    | CLAUDE_PROJECT_DIR="$TARGET" SESSION_JOURNAL_DIR="$SESSIONS_DIR" "$NUDGE" >/dev/null 2>&1 || STATUS=$?
-  if [ "$STATUS" -eq 0 ]; then
-    pass "stop_hook_active suppresses the freshness nudge (no infinite loop)"
-  elif [ "$STATUS" -eq 2 ]; then
-    fail "stop_hook_active suppresses the freshness nudge" "the newest journal has secret-looking content; run the Stop hook directly to see the line numbers"
-  else
-    fail "the nudge runs cleanly" "exit status $STATUS"
-  fi
-
-  # Only meaningful once a journal exists: with an empty directory the nudge
-  # exits 2 for the missing journal, which is not a secrets finding.
-  JOURNAL_COUNT=0
-  for candidate in "$SESSIONS_DIR"/*.md; do
-    [ -e "$candidate" ] || continue
-    case "$(basename "$candidate")" in README.md|TEMPLATE.md) continue ;; esac
-    JOURNAL_COUNT=$((JOURNAL_COUNT + 1))
-  done
-  if [ "$JOURNAL_COUNT" -eq 0 ]; then
-    note "no journal to scan for secrets yet"
-  else
-    STATUS=0
-    printf '%s' '{"stop_hook_active":false}' \
-      | CLAUDE_PROJECT_DIR="$TARGET" SESSION_JOURNAL_DIR="$SESSIONS_DIR" JOURNAL_FRESH_SECS=999999999 SESSION_JOURNAL_SKIP=1 "$NUDGE" >/dev/null 2>&1 || STATUS=$?
-    if [ "$STATUS" -eq 0 ]; then
-      pass "the newest journal is free of secret-looking content"
-    elif [ "$STATUS" -eq 2 ]; then
-      fail "the newest journal is free of secret-looking content" "run the Stop hook directly for the line numbers"
-    else
-      fail "the secrets guard runs cleanly" "exit status $STATUS"
-    fi
-  fi
-fi
-
-# --- Instruction blocks ------------------------------------------------------
+# --- Instruction blocks and skills -------------------------------------------
 
 for instructions in "$TARGET/CLAUDE.md" "$TARGET/AGENTS.md"; do
   [ -e "$instructions" ] || continue
@@ -246,6 +200,9 @@ for instructions in "$TARGET/CLAUDE.md" "$TARGET/AGENTS.md"; do
   else
     fail "$label carries a balanced session-journal block" "$begins begin marker(s), $ends end marker(s)"
   fi
+done
+for skill in .claude/skills/session-journal .agents/skills/session-journal; do
+  [ -e "$TARGET/$skill/SKILL.md" ] && note "skill installed: $skill"
 done
 
 echo

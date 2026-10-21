@@ -29,18 +29,17 @@ commit_target() {
 @test "a missing hook script is reported" {
   "$BATS_TEST_DIRNAME/../install.sh" "$TARGET" >/dev/null
   commit_target
-  rm -f "$TARGET/.claude/hooks/session-journal-nudge.sh"
+  rm -f "$TARGET/.claude/hooks/session-journal.py"
   run "$BATS_TEST_DIRNAME/../doctor.sh" "$TARGET"
   [ "$status" -eq 1 ]
   [[ "$output" == *"FAIL"* ]]
-  [[ "$output" == *"session-journal-nudge.sh exists"* ]]
+  [[ "$output" == *"session-journal.py exists"* ]]
 }
 
 @test "an uninstalled repository is reported rather than passing quietly" {
   run "$BATS_TEST_DIRNAME/../doctor.sh" "$TARGET"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"a SessionStart hook is registered"* ]]
-  [[ "$output" == *"a Stop hook is registered"* ]]
+  [[ "$output" == *"a runtime is wired"* ]]
 }
 
 @test "hooks that git will never share with a teammate are reported" {
@@ -62,15 +61,16 @@ commit_target() {
 @test "a journal carrying a secret is reported" {
   "$BATS_TEST_DIRNAME/../install.sh" "$TARGET" >/dev/null
   commit_target
-  printf '**Status:** ACTIVE\n\n## Live plan pointer\nnone\n\n## Next step for a fresh agent\nx\napi_key = sk-live-4eC39HqLyjWDarjtT1z\n' \
+  printf '**Status:** ACTIVE\n\n## Live plan pointer\nnone\n\n## Next step for a fresh agent\nx\napi_key = %s\n' "sk-live-""4eC39HqLyjWDarjtT1z" \
     > "$TARGET/sessions/2026-01-02-0304-leak.md"
   run "$BATS_TEST_DIRNAME/../doctor.sh" "$TARGET"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"free of secret-looking content"* ]]
+  [[ "$output" == *"credential-shaped content"* ]]
+  [[ "$output" == *"2026-01-02-0304-leak.md"* ]]
   [[ "$output" != *"sk-live"* ]]
 }
 
-@test "the doctor reports which journal the pointer would deliver" {
+@test "the doctor reports the open candidate journals" {
   "$BATS_TEST_DIRNAME/../install.sh" "$TARGET" >/dev/null
   commit_target
   printf '**Status:** ACTIVE\n\n## Live plan pointer\nnone\n\n## Next step for a fresh agent\nx\n' \
@@ -104,5 +104,27 @@ commit_target() {
   commit_target
   run "$BATS_TEST_DIRNAME/../doctor.sh" "$TARGET"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"a Stop hook is registered"* ]]
+  [[ "$output" == *"wires all six journal hooks"* ]]
+  [[ "$output" == *"missing: Stop"* ]]
+}
+
+@test "leftover v1 hooks are reported" {
+  "$BATS_TEST_DIRNAME/../install.sh" "$TARGET" >/dev/null
+  jq '.hooks.Stop += [{hooks:[{type:"command",command:"./.claude/hooks/session-journal-nudge.sh"}]}]' \
+    "$TARGET/.claude/settings.json" > "$TARGET/settings.new"
+  mv "$TARGET/settings.new" "$TARGET/.claude/settings.json"
+  commit_target
+  run "$BATS_TEST_DIRNAME/../doctor.sh" "$TARGET"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"carries no v1 hooks"* ]]
+}
+
+@test "a hook command without its safety net is reported" {
+  "$BATS_TEST_DIRNAME/../install.sh" "$TARGET" >/dev/null
+  jq '.hooks.Stop[0].hooks[0].command |= rtrimstr(" || true")' "$TARGET/.claude/settings.json" > "$TARGET/settings.new"
+  mv "$TARGET/settings.new" "$TARGET/.claude/settings.json"
+  commit_target
+  run "$BATS_TEST_DIRNAME/../doctor.sh" "$TARGET"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"ends in '|| true'"* ]]
 }

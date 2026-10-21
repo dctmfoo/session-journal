@@ -9,11 +9,12 @@ Usage: ./install.sh /path/to/target-repo [options]
 
   --sessions-dir <path>   Journal directory, relative to the target repo (default: sessions)
   --plan-pointer <value>  Default "Live plan pointer" for the generated README (default: none)
-  --codex                 Also install Codex hooks and the AGENTS.md block
-  --no-claude             Skip Claude Code hooks and the CLAUDE.md block
+  --codex                 Also install Codex hooks, the Codex skill, and the AGENTS.md block
+  --no-claude             Skip Claude Code hooks, the Claude skill, and the CLAUDE.md block
+  --no-skill              Do not install the session-journal agent skill
   --refresh-docs          Regenerate the sessions README, TEMPLATE.md, and the
                           instruction blocks, discarding local adaptations
-  --uninstall             Remove the owned hooks, scripts, and instruction blocks
+  --uninstall             Remove the owned hooks, script, skills, and instruction blocks
 USAGE
   exit 64
 }
@@ -27,6 +28,7 @@ SESSIONS_REL_EXPLICIT=false
 PLAN_POINTER="none"
 INSTALL_CODEX=false
 INSTALL_CLAUDE=true
+INSTALL_SKILL=true
 REFRESH_DOCS=false
 UNINSTALL=false
 
@@ -45,6 +47,7 @@ while [ "$#" -gt 0 ]; do
       ;;
     --codex) INSTALL_CODEX=true; shift ;;
     --no-claude) INSTALL_CLAUDE=false; shift ;;
+    --no-skill) INSTALL_SKILL=false; shift ;;
     --refresh-docs) REFRESH_DOCS=true; shift ;;
     --uninstall) UNINSTALL=true; shift ;;
     -h|--help) usage ;;
@@ -58,6 +61,7 @@ case "$SESSIONS_REL" in
     exit 64
     ;;
 esac
+SESSIONS_REL=${SESSIONS_REL%/}
 
 case "$PLAN_POINTER" in
   *[\"\\]*|*"|"*|*"
@@ -77,6 +81,16 @@ command -v jq >/dev/null 2>&1 || { echo "jq is required to merge hook settings s
 
 CLAUDE_SETTINGS="$TARGET/.claude/settings.json"
 CODEX_SETTINGS="$TARGET/.codex/hooks.json"
+SCRIPT_NAME="session-journal.py"
+SCRIPT="$TARGET/.claude/hooks/$SCRIPT_NAME"
+CLAUDE_SKILL="$TARGET/.claude/skills/session-journal"
+CODEX_SKILL="$TARGET/.agents/skills/session-journal"
+STATE_DIR="$TARGET/.claude/state/session-journal"
+# Every hook group a release of this project has owned. v1 shipped two shell
+# scripts; 2.0 replaces both with one Python program. Matching all three names
+# is what lets an install double as the v1 -> v2 migration.
+OWNED_PATTERN="session-journal\\.py|session-journal-pointer\\.sh|session-journal-nudge\\.sh"
+LEGACY_SCRIPTS="session-journal-pointer.sh session-journal-nudge.sh"
 
 validate_json_file() {
   local file=$1
@@ -129,7 +143,7 @@ replace_owned_block() {
   local tmp="$destination.session-journal.tmp"
   [ -e "$destination" ] || : > "$destination"
   strip_owned_block "$destination" > "$tmp"
-  while [ -s "$tmp" ] && [ "$(tail -c 1 "$tmp" | wc -l | tr -d ' ')" -eq 0 ]; do printf '\n' >> "$tmp"; break; done
+  if [ -s "$tmp" ] && [ "$(tail -c 1 "$tmp" | wc -l | tr -d ' ')" -eq 0 ]; then printf '\n' >> "$tmp"; fi
   {
     printf '%s\n' '<!-- session-journal:begin -->'
     render_template "$template"
@@ -150,41 +164,37 @@ remove_owned_block() {
   [ -s "$destination" ] || rm -f "$destination"
 }
 
+# Remove every hook group that runs an owned script, under every event. Groups
+# that mix an owned command with a foreign one keep the foreign command.
 remove_hooks() {
   local file=$1
   [ -e "$file" ] || return 0
   validate_json_file "$file"
   local tmp="$file.session-journal.tmp"
-  jq '
-    .hooks = (.hooks // {})
-    | .hooks.SessionStart = [.hooks.SessionStart[]? | select((.hooks // [] | map(.command // "") | join(" ") | contains("session-journal-pointer.sh")) | not)]
-    | .hooks.Stop = [.hooks.Stop[]? | select((.hooks // [] | map(.command // "") | join(" ") | contains("session-journal-nudge.sh")) | not)]
+  jq --arg owned "$OWNED_PATTERN" '
+    if (.hooks | type) == "object" then
+      .hooks |= with_entries(.value |= (
+        [ .[]? | .hooks = [ (.hooks // [])[] | select((.command // "") | test($owned) | not) ]
+               | select((.hooks | length) > 0) ]))
+    else . end
   ' "$file" > "$tmp"
   mv "$tmp" "$file"
 }
 
-# ADOPT.md Phase B tells the adopting agent to add environment overrides such as
-# JOURNAL_FRESH_SECS to the generated command. Rebuilding the command from
-# scratch deleted them on every re-run, so carry any foreign assignments across.
-# ADOPT.md Phase B tells the adopting agent to add environment overrides such as
-# JOURNAL_FRESH_SECS to the generated command. Rebuilding the command from
-# scratch deleted them on every re-run, so carry any foreign assignments across.
-#
-# Only the leading assignments of the matching command are read -- that is the
-# one place a shell env prefix can legally live -- and quoted values are parsed
-# rather than stripped. Stripping quotes first turned NAME="value" into NAME=,
-# silently dropping exactly the override this exists to preserve, and reading
-# the whole command string would let an unrelated hook that merely mentions the
-# script name contribute text to a freshly generated command.
+# The command currently registered for an event, if it runs an owned script.
 existing_command() {
-  local file=$1 event=$2 hook=$3
+  local file=$1 event=$2
   [ -e "$file" ] || return 0
-  jq -r --arg event "$event" --arg hook "$hook" '
+  jq -r --arg event "$event" --arg owned "$OWNED_PATTERN" '
     [(.hooks // {})[$event][]? | .hooks[]? | .command // ""]
-    | map(select(contains($hook))) | first // ""
+    | map(select(test($owned))) | first // ""
   ' "$file" 2>/dev/null || printf ''
 }
 
+# Leading NAME=value assignments of a command -- the one place a shell env
+# prefix can legally live. Quoted values are parsed rather than stripped.
+# `keep` is "all", or "foreign" to drop SESSION_JOURNAL_DIR, which the
+# installer owns. v1-only knobs that 2.0 no longer reads are dropped too.
 parse_env_prefix() {
   local rest=$1 keep=$2 name value out=""
   while :; do
@@ -203,32 +213,33 @@ parse_env_prefix() {
       value=${rest%% *}
       rest=${rest#"$value"}
     fi
-    if [ "$keep" = "all" ] || [ "$name" != "SESSION_JOURNAL_DIR" ]; then
-      out="$out$name=$value "
-    fi
+    case "$keep:$name" in
+      all:*) out="$out$name=$value " ;;
+      foreign:SESSION_JOURNAL_DIR|foreign:JOURNAL_FRESH_SECS|foreign:JOURNAL_REQUIRE_CONTENT_CHANGE|foreign:JOURNAL_STOP_MARKER_TTL_SECS) ;;
+      *) out="$out$name=$value " ;;
+    esac
     rest=${rest# }
   done
   printf '%s' "$out"
 }
 
-preserved_env() {
-  local existing
-  existing=$(existing_command "$1" "$2" "$3")
-  [ -n "$existing" ] || return 0
-  parse_env_prefix "$existing" foreign
-}
-
 # The journal directory a previous install wired into this settings file, as a
 # path relative to the repository root, or empty when the default is in use.
+# v1 wrote SESSION_JOURNAL_DIR="$(git rev-parse ...)/<dir>"; 2.0 writes the
+# relative path, which the script resolves against the main checkout.
 configured_sessions_dir() {
-  local existing
-  existing=$(existing_command "$1" "$2" "$3")
-  [ -n "$existing" ] || return 0
-  # Matched in place rather than split on spaces: the generated value contains a
-  # command substitution, which contains spaces of its own.
-  parse_env_prefix "$existing" all \
-    | sed -n 's|.*SESSION_JOURNAL_DIR="[^"]*)/\([^"]*\)".*|\1|p' \
-    | head -n 1
+  local file=$1 event existing value
+  for event in Stop SessionStart; do
+    existing=$(existing_command "$file" "$event")
+    [ -n "$existing" ] || continue
+    value=$(parse_env_prefix "$existing" all | sed -nE 's/^(.* )?SESSION_JOURNAL_DIR=("[^"]*"|[^ "]+).*/\2/p' | head -n 1)
+    [ -n "$value" ] || continue
+    value=${value#\"}
+    value=${value%\"}
+    case "$value" in *")/"*) value=${value##*)/} ;; esac
+    printf '%s' "$value"
+    return 0
+  done
 }
 
 if [ "$UNINSTALL" = true ]; then
@@ -237,20 +248,25 @@ if [ "$UNINSTALL" = true ]; then
   # remove_owned_block below strips both regardless of the runtime flags.
   sentinels_balanced "$TARGET/CLAUDE.md" || exit 65
   sentinels_balanced "$TARGET/AGENTS.md" || exit 65
+  validate_json_file "$CLAUDE_SETTINGS"
+  validate_json_file "$CODEX_SETTINGS"
   remove_hooks "$CLAUDE_SETTINGS"
   remove_hooks "$CODEX_SETTINGS"
-  rm -f "$TARGET/.claude/hooks/session-journal-pointer.sh" "$TARGET/.claude/hooks/session-journal-nudge.sh"
+  rm -f "$SCRIPT"
+  for legacy in $LEGACY_SCRIPTS; do rm -f "$TARGET/.claude/hooks/$legacy"; done
+  rm -rf "${CLAUDE_SKILL:?}" "${CODEX_SKILL:?}" "${STATE_DIR:?}"
   remove_owned_block "$TARGET/CLAUDE.md"
   remove_owned_block "$TARGET/AGENTS.md"
-  echo "Session-journal hooks and instruction blocks removed. Journals, their README, and TEMPLATE.md were kept as project history."
+  # Directories the install created and that are now empty; anything else stays.
+  for dir in .claude/hooks .claude/skills .claude/state .agents/skills .agents; do
+    rmdir "$TARGET/$dir" 2>/dev/null || true
+  done
+  echo "Session-journal hooks, script, skills, local state, and instruction blocks removed. Journals, their README, and TEMPLATE.md were kept as project history."
   exit 0
 fi
 
 # ---------------------------------------------------------------------------
-# Preflight. Every refusal happens here, before the first byte is written: the
-# installer used to copy both hooks and merge them live into settings.json and
-# THEN exit 65 on an unmatched sentinel, leaving enforcement wired up with no
-# instruction block to explain it, plus a stray .tmp file in the repository.
+# Preflight. Every refusal happens here, before the first byte is written.
 # ---------------------------------------------------------------------------
 
 [ "$INSTALL_CLAUDE" = false ] || validate_json_file "$CLAUDE_SETTINGS"
@@ -258,10 +274,13 @@ fi
 [ "$INSTALL_CLAUDE" = false ] || sentinels_balanced "$TARGET/CLAUDE.md" || exit 65
 [ "$INSTALL_CODEX" = false ] || sentinels_balanced "$TARGET/AGENTS.md" || exit 65
 
-# The installed hook commands resolve their own root at runtime with
-# `git rev-parse --show-toplevel`. Installing into a subdirectory of a git repo
-# therefore writes a command that points at a path which does not exist, and the
-# hooks fail silently forever. Catch it here instead.
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "Note: python3 is not on PATH here. The hooks need Python 3.8+ wherever the agent runs; without it they do nothing (each command ends in '|| true' so a missing interpreter never blocks the agent)." >&2
+fi
+
+# The installed hook commands resolve their root at runtime. Installing into a
+# subdirectory of a git repository writes a command that points at a path
+# which does not exist, and the hooks fail silently forever. Catch it here.
 if GIT_TOPLEVEL=$(git -C "$TARGET" rev-parse --show-toplevel 2>/dev/null); then
   GIT_TOPLEVEL=$(cd "$GIT_TOPLEVEL" && pwd -P)
   if [ "$GIT_TOPLEVEL" != "$TARGET_REAL" ]; then
@@ -269,19 +288,24 @@ if GIT_TOPLEVEL=$(git -C "$TARGET" rev-parse --show-toplevel 2>/dev/null); then
     echo "The installed hooks resolve their root with 'git rev-parse --show-toplevel' at runtime, so they would look for themselves in the wrong place. Install into the repository root instead." >&2
     exit 65
   fi
+  # A linked worktree shares its journals with the main checkout; installing
+  # here would commit hooks on a branch while the journals live elsewhere.
+  GIT_COMMON=$(git -C "$TARGET" rev-parse --git-common-dir 2>/dev/null || printf '')
+  case "$GIT_COMMON" in /*) ;; *) GIT_COMMON="$TARGET/$GIT_COMMON" ;; esac
+  if [ "$(basename "$GIT_COMMON")" = ".git" ] && [ "$(cd "$(dirname "$GIT_COMMON")" && pwd -P)" != "$TARGET_REAL" ]; then
+    echo "Note: $TARGET is a linked worktree. The hooks keep journals in the main checkout ($(dirname "$GIT_COMMON")); commit this install on the branch the main checkout uses." >&2
+  fi
 else
   echo "Note: $TARGET is not a git repository. The hook commands fall back to the agent's working directory at runtime; start the agent from the repository root." >&2
 fi
 
 # A rerun without --sessions-dir must not silently relocate the journal
-# directory. Rebuilding the command from the default orphaned every existing
-# journal -- the hooks began pointing at an empty `sessions/` while the real
-# history sat unreachable in `docs/sessions/` -- and reported success.
+# directory: rebuilding the command from the default orphaned every existing
+# journal while reporting success.
 if [ "$SESSIONS_REL_EXPLICIT" = false ]; then
   for candidate_settings in "$CLAUDE_SETTINGS" "$CODEX_SETTINGS"; do
     [ -e "$candidate_settings" ] || continue
-    existing_dir=$(configured_sessions_dir "$candidate_settings" Stop session-journal-nudge.sh)
-    [ -n "$existing_dir" ] || existing_dir=$(configured_sessions_dir "$candidate_settings" SessionStart session-journal-pointer.sh)
+    existing_dir=$(configured_sessions_dir "$candidate_settings")
     if [ -n "$existing_dir" ] && [ "$existing_dir" != "$SESSIONS_REL" ]; then
       SESSIONS_REL=$existing_dir
       echo "Reusing the journal directory already configured here: $SESSIONS_REL/ (pass --sessions-dir to move it)."
@@ -313,55 +337,75 @@ EVIDENCE_VOCABULARY="commit hashes, test names, issue IDs, and document section 
 
 mkdir -p "$TARGET/.claude/hooks" "$SESSIONS_ABS"
 
-install_hook_script() {
-  local name=$1
-  sed "s|<VERSION>|$VERSION|" "$SOURCE/hooks/$name" > "$TARGET/.claude/hooks/$name"
-  chmod +x "$TARGET/.claude/hooks/$name"
-}
-install_hook_script session-journal-pointer.sh
-install_hook_script session-journal-nudge.sh
+cp "$SOURCE/hooks/$SCRIPT_NAME" "$SCRIPT"
+chmod +x "$SCRIPT"
+for legacy in $LEGACY_SCRIPTS; do
+  if [ -e "$TARGET/.claude/hooks/$legacy" ]; then
+    rm -f "$TARGET/.claude/hooks/$legacy"
+    echo "Removed the v1 hook script .claude/hooks/$legacy (replaced by $SCRIPT_NAME)."
+  fi
+done
 
-# The sessions README is the adopting agent's artifact: ADOPT.md spends its
-# question budget adapting it to the repository. Regenerating it on every run
-# made the only available upgrade path silently revert that work.
+# The sessions README is the adopting agent's artifact: a rerun must not revert
+# the adaptation work ADOPT.md asks for.
 if [ -e "$SESSIONS_ABS/README.md" ] && [ "$REFRESH_DOCS" = false ]; then
   echo "Kept the existing $SESSIONS_REL/README.md (re-run with --refresh-docs to regenerate it)."
 else
   render_template "$SOURCE/templates/sessions-README.md" > "$SESSIONS_ABS/README.md"
 fi
-
-# Ship the journal shape itself. Without this, both the pointer hook and the
-# generated README told a fresh agent to start from a template that the
-# installer never placed, so every first journal was written from memory.
 if [ -e "$SESSIONS_ABS/TEMPLATE.md" ] && [ "$REFRESH_DOCS" = false ]; then
   echo "Kept the existing $SESSIONS_REL/TEMPLATE.md (re-run with --refresh-docs to regenerate it)."
 else
   render_template "$SOURCE/templates/session-journal.md" > "$SESSIONS_ABS/TEMPLATE.md"
 fi
 
-RUNTIME_ROOT="\$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+install_skill() {
+  local source=$1 destination=$2
+  [ "$INSTALL_SKILL" = true ] || return 0
+  rm -rf "${destination:?}"
+  mkdir -p "$(dirname "$destination")"
+  cp -R "$source" "$destination"
+}
+
+# Claude Code exports CLAUDE_PROJECT_DIR; Codex does not, and runs hooks in the
+# session's working directory, where git finds the root.
+RUNTIME_ROOT="\${CLAUDE_PROJECT_DIR:-\$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
 GENERATED_PREFIX=""
-[ "$SESSIONS_REL" = "sessions" ] || GENERATED_PREFIX="SESSION_JOURNAL_DIR=\"$RUNTIME_ROOT/$SESSIONS_REL\" "
+[ "$SESSIONS_REL" = "sessions" ] || GENERATED_PREFIX="SESSION_JOURNAL_DIR=$SESSIONS_REL "
 
 merge_hooks() {
-  local file=$1 runtime=$2 start_matcher="*"
-  [ "$runtime" = "codex" ] && start_matcher="startup|resume|clear|compact"
+  local file=$1 runtime=$2 groups="[]" event matcher timeout env command
   mkdir -p "$(dirname "$file")"
   [ -e "$file" ] || printf '%s\n' '{}' > "$file"
 
-  local pointer_env nudge_env pointer_command nudge_command
-  pointer_env=$(preserved_env "$file" SessionStart session-journal-pointer.sh)
-  nudge_env=$(preserved_env "$file" Stop session-journal-nudge.sh)
-  [ -z "$pointer_env" ] || echo "Preserved environment overrides on the SessionStart command: $pointer_env"
-  [ -z "$nudge_env" ] || echo "Preserved environment overrides on the Stop command: $nudge_env"
-  pointer_command="${pointer_env}${GENERATED_PREFIX}\"$RUNTIME_ROOT/.claude/hooks/session-journal-pointer.sh\""
-  nudge_command="${nudge_env}${GENERATED_PREFIX}\"$RUNTIME_ROOT/.claude/hooks/session-journal-nudge.sh\""
+  for event in SessionStart UserPromptSubmit PreToolUse PostToolUse Stop SessionEnd; do
+    matcher=""
+    timeout=10
+    case "$runtime:$event" in
+      claude:SessionStart) matcher="*"; timeout=15 ;;
+      codex:SessionStart) matcher="startup|resume|clear|compact"; timeout=15 ;;
+      claude:PreToolUse|claude:PostToolUse) matcher="Edit|Write|MultiEdit|NotebookEdit|Bash" ;;
+      codex:PreToolUse|codex:PostToolUse) matcher="Bash|apply_patch" ;;
+      *:Stop) timeout=30 ;;
+      claude:SessionEnd) timeout=5 ;;
+      codex:SessionEnd) timeout=3 ;;
+    esac
+    env=$(parse_env_prefix "$(existing_command "$file" "$event")" foreign)
+    [ -z "$env" ] || echo "Preserved environment overrides on the $event command: $env"
+    # `|| true`: a missing interpreter or script exits 127 or 2, and exit 2
+    # from a hook blocks the tool call or the turn. A journal hook must never.
+    command="${env}${GENERATED_PREFIX}python3 \"$RUNTIME_ROOT/.claude/hooks/$SCRIPT_NAME\" hook $event || true"
+    groups=$(jq -c --arg event "$event" --arg matcher "$matcher" --arg command "$command" --argjson timeout "$timeout" '
+      . + [{event: $event, group: ((if $matcher == "" then {} else {matcher: $matcher} end)
+                                   + {hooks: [{type: "command", command: $command, timeout: $timeout}]})}]
+    ' <<< "$groups")
+  done
 
+  remove_hooks "$file"
   local tmp="$file.session-journal.tmp"
-  jq --arg pointer "$pointer_command" --arg nudge "$nudge_command" --arg matcher "$start_matcher" '
-    .hooks = (.hooks // {})
-    | .hooks.SessionStart = ([.hooks.SessionStart[]? | select((.hooks // [] | map(.command // "") | join(" ") | contains("session-journal-pointer.sh")) | not)] + [{matcher:$matcher,hooks:[{type:"command",command:$pointer}]}])
-    | .hooks.Stop = ([.hooks.Stop[]? | select((.hooks // [] | map(.command // "") | join(" ") | contains("session-journal-nudge.sh")) | not)] + [{hooks:[{type:"command",command:$nudge}]}])
+  jq --argjson groups "$groups" '
+    .hooks = ((.hooks // {}) | if type == "object" then . else {} end)
+    | reduce $groups[] as $g (.; .hooks[$g.event] = ((.hooks[$g.event] // []) + [$g.group]))
   ' "$file" > "$tmp"
   mv "$tmp" "$file"
 }
@@ -369,13 +413,15 @@ merge_hooks() {
 if [ "$INSTALL_CLAUDE" = true ]; then
   merge_hooks "$CLAUDE_SETTINGS" claude
   replace_owned_block "$TARGET/CLAUDE.md" "$SOURCE/templates/CLAUDE.md-section.md" CLAUDE.md
+  install_skill "$SOURCE/skills/session-journal" "$CLAUDE_SKILL"
 fi
 if [ "$INSTALL_CODEX" = true ]; then
   merge_hooks "$CODEX_SETTINGS" codex
   replace_owned_block "$TARGET/AGENTS.md" "$SOURCE/templates/AGENTS.md-section.md" AGENTS.md
+  install_skill "$SOURCE/codex/skills/session-journal" "$CODEX_SKILL"
 fi
 
-echo "Session journal $VERSION installed at $SESSIONS_REL/. Run the verification steps in ADOPT.md Phase C, or ./doctor.sh $TARGET, before relying on it."
+echo "Session journal $VERSION installed at $SESSIONS_REL/. Run ./doctor.sh $TARGET before relying on it, then commit .claude/$( [ "$INSTALL_CODEX" = true ] && printf ', .codex/, .agents/'), the instruction blocks, and $SESSIONS_REL/."
 if [ "$INSTALL_CODEX" = true ]; then
   echo "Codex: trust this project and review the new hook definitions with /hooks before expecting them to run."
 fi

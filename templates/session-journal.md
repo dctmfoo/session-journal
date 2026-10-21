@@ -2,7 +2,9 @@
 
 **Started:** YYYY-MM-DD HH:MM {{TIMEZONE}}
 **Last updated:** YYYY-MM-DD HH:MM {{TIMEZONE}}
-**Status:** ACTIVE | DONE | BLOCKED — one current-state line
+**Status:** ACTIVE | PAUSED | BLOCKED | DONE — one current-state line
+**Worktree:** <worktree name> (<branch>)   (only when written from a linked worktree; omit otherwise)
+**Continues:** {{SESSIONS_DIR}}/<earlier journal>.md   (omit when this is new work)
 
 ## User intent
 <What the user asked for, quoted when short.>

@@ -1,6 +1,6 @@
 # Session journals
 
-This repository keeps one markdown journal per substantive working session in `{{SESSIONS_DIR}}/`. Journals are written for the next agent: they preserve continuity without replaying a conversation.
+This repository keeps one markdown journal per piece of substantive work in `{{SESSIONS_DIR}}/`. Journals are written for the next agent: they preserve continuity without replaying a conversation.
 
 ## Local defaults
 
@@ -13,6 +13,16 @@ This repository keeps one markdown journal per substantive working session in `{
 
 Use `YYYY-MM-DD-HHMM-<short-kebab-intent>.md` with the session-start time. Start from `{{SESSIONS_DIR}}/TEMPLATE.md`.
 
+## Which journal
+
+Hooks bind each journal to the session that writes it (`.claude/hooks/session-journal.py`, state in `.claude/state/session-journal/`, which never leaves this machine).
+
+- At start, the hook names the journal this session is bound to, or lists up to five open candidates ranked by worktree, uncommitted edits, status, and recent agent writes.
+- After the first prompt, continue the candidate the task really continues, or create a new journal. Your first write binds it.
+- A journal marked **IN USE** belongs to another live session: writes into it are denied. Start your own journal with `**Continues:** {{SESSIONS_DIR}}/<old>.md`.
+- Never pick a journal by newest name or date. Use `python3 .claude/hooks/session-journal.py candidates <words>` or `find <words>`; `reconstruct <journal>` shows the sessions that wrote one.
+- Sessions in a linked worktree still write here, in the main checkout, and add `**Worktree:** <name> (<branch>)`.
+
 ## THIN and DETAILED modes
 
 - **THIN:** `## Live plan pointer` names a governing plan, specification, tracker, ADR, or runbook. Record one-line outcomes and evidence pointers; never duplicate the governing document.
@@ -20,21 +30,22 @@ Use `YYYY-MM-DD-HHMM-<short-kebab-intent>.md` with the session-start time. Start
 
 ## Lifecycle
 
+- Journal only when something lands: a commit, a meaningful edit, a dispatch, a verified result, or a decision. A turn that only read or answered changes nothing here, and the Stop hook does not ask for it.
 - Same work continuing across days: append to the same journal and update its header.
-- Unrelated work: create a new journal.
-- After context compaction: read the newest journal and its live plan before acting, then refresh the journal if the compaction changed the next step.
+- Unrelated work, or a journal past about 40 KB: create a new journal; link it with `**Continues:**`.
+- After context compaction: read the bound journal and its live plan before acting.
 - Keep `**Status:**` to one line; move state history to `## Change log`.
-- Put updates in their proper sections, not at the end of the file.
-- Set `**Status:** DONE` when the work is finished. A DONE journal is treated as background, not as the live frontier, so the next session starts clean instead of inheriting a finished next step.
+- Set `**Status:** DONE` when the work is finished. A session that ends with the journal still `ACTIVE` marks it `PAUSED`; the `**Sessions:**` line is maintained by the hook.
+- Workers started with `JOURNAL_ROLE=worker` never write journals; their lead records the outcome.
 
 ## Sessions that need no journal
 
-A typo fix, a dependency bump, or a question answered without changing anything does not need a journal. Set `SESSION_JOURNAL_SKIP=1` for that session instead of writing a journal about nothing or working around the Stop hook. The secrets guard still runs.
+A typo fix, a dependency bump, or a question answered without changing anything does not need a journal. Start the agent with `SESSION_JOURNAL_SKIP=1`, or run `python3 .claude/hooks/session-journal.py skip`, instead of writing a journal about nothing.
 
 ## Content contract
 
 Allowed: concise milestones, decisions, verification evidence, commit references, issue IDs, and artifact pointers.
 
-Prefer evidence that can be re-run over a number captured at write time. `bats tests — 41 checks, see CI run <url>` can be checked by the next reader; `38 of 38 pass` becomes false the moment the suite grows, and the next agent will believe it and repeat it.
+Prefer evidence that can be re-run over a number captured at write time: name the command, the test, or the CI run.
 
-Never include credentials, credential fragments, private tokens, large logs, duplicated plan prose, or speculation presented as fact. The Stop hook scans the newest journal for common secret shapes. Redact a value to a key name, an env-var reference, or a placeholder such as `<redacted>`. A remaining false positive may carry `<!-- journal-secrets-ok -->` only after a human verifies that the line contains no credential value.
+Never include credentials, credential fragments, private tokens, customer or personal data, large logs, duplicated plan prose, or speculation presented as fact. The PreToolUse hook denies a journal write that looks like it carries a credential and names only the line and rule, never the value. Redact to a key name, an env-var reference, or `<redacted>`. A remaining false positive may carry `<!-- journal-secrets-ok -->` only after a human verifies that the line contains no credential value.

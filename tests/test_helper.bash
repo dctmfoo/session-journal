@@ -1,4 +1,8 @@
 setup_workspace() {
+  # The suite may itself run inside an agent session; its role, session id and
+  # project directory must not leak into the hooks under test.
+  unset JOURNAL_ROLE JOURNAL_WORKER_PROMPT JOURNAL_LANDING_BASH JOURNAL_SECRETS SESSION_JOURNAL_SKIP \
+    SESSION_JOURNAL_DISABLE SESSION_JOURNAL_STATE_DIR CLAUDE_CODE_SESSION_ID CLAUDE_PID CODEX_THREAD_ID
   export TEST_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/session-journal-test.XXXXXX")"
   export CLAUDE_PROJECT_DIR="$TEST_ROOT"
   export SESSION_JOURNAL_DIR="$TEST_ROOT/sessions"
