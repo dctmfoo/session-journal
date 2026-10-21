@@ -1,4 +1,8 @@
 setup_workspace() {
+  # The suite may itself run inside an agent session; its role, session id and
+  # project directory must not leak into the hooks under test.
+  unset JOURNAL_ROLE JOURNAL_WORKER_PROMPT JOURNAL_LANDING_BASH JOURNAL_SECRETS SESSION_JOURNAL_SKIP \
+    SESSION_JOURNAL_DISABLE SESSION_JOURNAL_STATE_DIR CLAUDE_CODE_SESSION_ID CLAUDE_PID CODEX_THREAD_ID
   export TEST_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/session-journal-test.XXXXXX")"
   export CLAUDE_PROJECT_DIR="$TEST_ROOT"
   export SESSION_JOURNAL_DIR="$TEST_ROOT/sessions"
@@ -21,4 +25,24 @@ write_journal() {
 make_stale() {
   local path="$1"
   touch -t 202001010000 "$path"
+}
+
+# A workspace that is a real git work tree, for the content-change gate.
+setup_git_workspace() {
+  setup_workspace
+  git -C "$TEST_ROOT" init -q
+  git -C "$TEST_ROOT" config user.email journal@test.invalid
+  git -C "$TEST_ROOT" config user.name "Journal Test"
+  mkdir -p "$TEST_ROOT/src"
+  printf 'v1\n' > "$TEST_ROOT/src/app.txt"
+}
+
+commit_workspace() {
+  git -C "$TEST_ROOT" add -A >/dev/null
+  git -C "$TEST_ROOT" commit -qm "${1:-checkpoint}"
+}
+
+# Give every journal the same whole-second mtime, the way a checkout does.
+tie_mtimes() {
+  touch -t 202601020304 "$@"
 }

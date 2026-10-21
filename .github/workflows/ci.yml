@@ -10,32 +10,46 @@ permissions:
 jobs:
   test:
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: bats-core/bats-action@3.0.1
+      # Actions are pinned by commit SHA. This repository already SHA-pins the
+      # gitleaks tarball below; a mutable tag on an action that can read the
+      # workflow token is the weaker link of the two.
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: bats-core/bats-action@42fcc8700f773c075a16a90eb11674c0318ad507 # 3.0.1
       - name: Install shellcheck on macOS
         if: runner.os == 'macOS'
         run: brew install shellcheck
       - name: Validate shell syntax
         run: |
-          bash -n hooks/session-journal-pointer.sh
-          bash -n hooks/session-journal-nudge.sh
-          bash -n extras/spine-promotion/journal-spine-promotion-nudge.sh
           bash -n install.sh
+          bash -n doctor.sh
       - name: Run shellcheck
-        run: shellcheck hooks/*.sh extras/spine-promotion/*.sh install.sh
+        run: shellcheck install.sh doctor.sh
+      - name: Run the hook scenario tests
+        # The runner's python3; the script itself is also checked to parse
+        # under the oldest supported interpreter's grammar (3.8).
+        run: |
+          python3 --version
+          python3 -c "import ast; ast.parse(open('hooks/session-journal.py').read(), feature_version=(3, 8))"
+          python3 -m unittest discover -s tests -p 'test_*.py'
       - name: Run bats suites
         run: bats tests
-      - name: Check tracked journals with the runtime secrets guard
-        run: printf '%s' '{"stop_hook_active":false}' | JOURNAL_FRESH_SECS=999999999 hooks/session-journal-nudge.sh
+      - name: Self-check this repository's own installation
+        run: ./doctor.sh .
+      - name: Check every tracked journal for credential shapes
+        # The hook checks each journal write as it happens; CI re-checks every
+        # tracked journal, because older journals are history a reader still
+        # trusts. Line numbers and rule names only, never values.
+        run: python3 hooks/session-journal.py scan sessions/2*.md
 
   secrets:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
       - name: Install gitleaks 8.24.3

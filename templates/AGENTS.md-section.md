@@ -1,9 +1,9 @@
 ## Session-journal discipline
 
-For substantive work, keep one journal in `{{SESSIONS_DIR}}/` using `YYYY-MM-DD-HHMM-<slug>.md`. Read the newest journal before resuming work. Continue the same task in the same file; create a new file for unrelated work.
+For substantive work, keep one journal in `{{SESSIONS_DIR}}/` using `YYYY-MM-DD-HHMM-<slug>.md`, started from `{{SESSIONS_DIR}}/TEMPLATE.md`. The SessionStart hook names the journal this session is bound to, or lists candidates: continue the one the task really continues, never one marked IN USE (start your own with `**Continues:**` instead), and never pick a journal by newest name or date. Search older work with `python3 .claude/hooks/session-journal.py find <words>`.
 
-Use THIN mode when `## Live plan pointer` names a governing artifact, and DETAILED mode when it is `none`. Before ending a resumable turn, update `**Last updated:**`, `**Status:**`, evidence, current state, and `## Next step for a fresh agent`. Never put secrets or credential fragments in a journal. Follow `{{SESSIONS_DIR}}/README.md`.
+Journal only when something lands: a commit, a meaningful edit, a dispatch, a verified result, or a decision. Use THIN mode when `## Live plan pointer` names a governing artifact, and DETAILED mode when it is `none`. When you update, refresh `**Last updated:**`, `**Status:**`, evidence, current state, and `## Next step for a fresh agent`. Never put secrets or credential fragments in a journal. Workers started with `JOURNAL_ROLE=worker` report to their lead and write no journal. Follow `{{SESSIONS_DIR}}/README.md` and the `session-journal` skill.
 
-Runtime fallback: if this agent host does not run Stop hooks, perform the same freshness and secrets check manually before every final response.
+Runtime fallback: if this agent host does not run the hooks, pick the journal with `python3 .claude/hooks/session-journal.py candidates`, and before a final response that landed work, update the journal and run `python3 .claude/hooks/session-journal.py scan`.
 
 If both CLAUDE.md and AGENTS.md carry this block, keep their session-journal rules synchronized.

@@ -1,0 +1,8 @@
+# Synthetic credential fixtures in 1.1.0 test history (tests/secrets-guard.bats, tests/doctor.bats).
+# They exist to prove the secrets check fires; none is a real credential.
+a9a5e9b5571efc042c3bb608be2e4c72516420ac:tests/secrets-guard.bats:generic-api-key:123
+a9a5e9b5571efc042c3bb608be2e4c72516420ac:tests/secrets-guard.bats:generic-api-key:124
+a9a5e9b5571efc042c3bb608be2e4c72516420ac:tests/secrets-guard.bats:generic-api-key:125
+a9a5e9b5571efc042c3bb608be2e4c72516420ac:tests/secrets-guard.bats:generic-api-key:128
+a9a5e9b5571efc042c3bb608be2e4c72516420ac:tests/secrets-guard.bats:generic-api-key:131
+a9e4e2a3a55261d6b4d234eb80f12ebcceacabc7:tests/doctor.bats:generic-api-key:65
