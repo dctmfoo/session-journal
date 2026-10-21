@@ -57,7 +57,7 @@ try:
 except ImportError:            # not POSIX: run without the lock
     fcntl = None
 
-VERSION = '2.0.0'
+VERSION = '2.0.1'
 SKIP_OK = '<!-- journal-secrets-ok -->'
 NAME = re.compile(r'^(\d{4}-\d\d-\d\d-(?:\d{4}-)?[A-Za-z0-9._-]+\.md)$')     # HHMM is optional: older journals lack it
 CLOSED = {'DONE', 'COMPLETE', 'COMPLETED', 'DELIVERED', 'CLOSED', 'SUPERSEDED', 'ABANDONED', '?'}  # anything else is open
@@ -1005,8 +1005,21 @@ def on_post_tool(ctx, inp):
                 lease['size_warned'] = free[-1]
                 notes.append(f"{ctx.show(free[-1])} is {c['bytes'] // 1024} KB. Finish this update, then continue the "
                              f"work in a new journal whose header says '**Continues:** {ctx.show(free[-1])}'.")
+        leaks = []
+        if cmd is not None and ctx.secrets != 'off':
+            # A shell write can carry a credential PreToolUse never saw (`cat secret > "$F"`): scan the journal itself.
+            for jn in names:
+                hits = scan_secrets(read(ctx.jpath(jn)))
+                if hits:
+                    leaks.append((jn, hits))
+            if ctx.secrets == 'deny':
+                lease['leaked'] = sorted(set(lease.get('leaked') or []) | {jn for jn, _ in leaks})
         ctx.save_lease(lease)
-    if names and ctx.secrets == 'warn':
+    for jn, hits in leaks:
+        ctx.trace(ev='secret-after-write', sid=lease['sid'], journal=jn, kinds=[h[1] for h in hits])
+        notes.append(f"{ctx.show(jn)} now contains credential-shaped content ({fmt_hits(hits)}). Remove the value "
+                     "now and write where the secret lives instead; journals are committed and shared.")
+    if names and cmd is None and ctx.secrets == 'warn':
         hits = scan_secrets(tool_text(tool, ti))
         if hits:
             ctx.trace(ev='secret-warning', sid=lease['sid'], journal=names[-1], kinds=[h[1] for h in hits])
@@ -1047,6 +1060,17 @@ def on_stop(ctx, inp):
     nudge = None
     with ctx.lock():
         lease = get_lease(ctx, inp)
+        leaks = [(jn, scan_secrets(read(ctx.jpath(jn)))) for jn in lease.get('leaked') or []]
+        leaks = [(jn, h) for jn, h in leaks if h]
+        if lease.get('leaked'):
+            lease['leaked'] = [jn for jn, _ in leaks]
+        if leaks and not inp.get('stop_hook_active'):
+            ctx.save_lease(lease)
+            ctx.trace(ev='stop', sid=sid, result='secret', journal=leaks[-1][0])
+            return {'decision': 'block', 'reason': 'SESSION-JOURNAL-SECRETS: ' + '; '.join(
+                f'{ctx.show(jn)} still contains credential-shaped content ({fmt_hits(h)})' for jn, h in leaks) +
+                '. Remove the values and write where each secret lives (a vault entry, an env var name, or '
+                '<redacted>). Mark a line <!-- journal-secrets-ok --> only after a human has checked it.'}
         key = turn_key(inp, lease, fallback=f['turn_start_ts'])
         t0 = iso_epoch(f['turn_start_ts'] or '') - 2
         turn = turn_record(lease, key)

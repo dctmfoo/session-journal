@@ -23,8 +23,11 @@ The installer never fetches code. It only copies from the clone you run it from.
 
 `PreToolUse` scans the **new text** of each journal write: an editing tool, `apply_patch`, or a recognisable shell
 write. It looks for credential shapes and denies the write when one matches. The denial names line numbers and rule
-names, never the matched value, so the hook cannot leak a secret into a transcript. `scan` and `./doctor.sh` apply
-the same rules to every journal on disk.
+names, never the matched value, so the hook cannot leak a secret into a transcript. A shell command can hide both
+its target and its content (`cat notes > "$F"`), so after any shell command that changed a journal, `PostToolUse`
+scans the journal file itself. A match cannot be denied after the fact: the agent is told to remove it, and in
+`deny` mode Stop blocks until the journal is clean. `scan` and `./doctor.sh` apply the same rules to every journal on
+disk.
 
 It is a continuity aid, not a credential scanner:
 
