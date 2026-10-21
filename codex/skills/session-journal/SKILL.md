@@ -48,6 +48,7 @@ Configure behaviour with environment prefixes on the generated hook commands. A 
 | A private repository where the owner wants credentials recorded | `JOURNAL_SECRETS=warn`, only with the owner's explicit decision |
 | Sessions should not mark a journal PAUSED when they end | `JOURNAL_PAUSE_ON_END=0` |
 | Different lock or nudge timing | `JOURNAL_LIVE_MIN`, `JOURNAL_NUDGE_MIN`, `JOURNAL_MAX_KB` |
+| Long DETAILED journals should be promoted into plans | `SPINE_PROMOTION_THRESHOLD=6` (asked once per journal), `SPINE_PROMOTION_TARGET_HINT` |
 
 Anything the hooks cannot know, such as the evidence vocabulary or which documents govern which work, goes in
 `<sessions>/README.md`.

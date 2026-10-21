@@ -90,7 +90,12 @@ STATE_DIR="$TARGET/.claude/state/session-journal"
 # scripts; 2.0 replaces both with one Python program. Matching all three names
 # is what lets an install double as the v1 -> v2 migration.
 OWNED_PATTERN="session-journal\\.py|session-journal-pointer\\.sh|session-journal-nudge\\.sh"
-LEGACY_SCRIPTS="session-journal-pointer.sh session-journal-nudge.sh"
+# The optional 1.x spine-promotion Stop hook is now built into session-journal.py
+# (SPINE_PROMOTION_THRESHOLD). Its groups are removed with ours, and its
+# settings are carried onto the generated Stop command.
+SPINE_PATTERN="journal-spine-promotion-nudge\\.sh"
+REMOVE_PATTERN="$OWNED_PATTERN|$SPINE_PATTERN"
+LEGACY_SCRIPTS="session-journal-pointer.sh session-journal-nudge.sh journal-spine-promotion-nudge.sh"
 
 validate_json_file() {
   local file=$1
@@ -171,7 +176,7 @@ remove_hooks() {
   [ -e "$file" ] || return 0
   validate_json_file "$file"
   local tmp="$file.session-journal.tmp"
-  jq --arg owned "$OWNED_PATTERN" '
+  jq --arg owned "$REMOVE_PATTERN" '
     if (.hooks | type) == "object" then
       .hooks |= with_entries(.value |= (
         [ .[]? | .hooks = [ (.hooks // [])[] | select((.command // "") | test($owned) | not) ]
@@ -189,6 +194,14 @@ existing_command() {
     [(.hooks // {})[$event][]? | .hooks[]? | .command // ""]
     | map(select(test($owned))) | first // ""
   ' "$file" 2>/dev/null || printf ''
+}
+
+# The 1.x spine-promotion command registered under Stop, if any.
+spine_command() {
+  [ -e "$1" ] || return 0
+  jq -r --arg spine "$SPINE_PATTERN" '
+    [(.hooks // {}).Stop[]? | .hooks[]? | .command // ""] | map(select(test($spine))) | first // ""
+  ' "$1" 2>/dev/null || printf ''
 }
 
 # Leading NAME=value assignments of a command -- the one place a shell env
@@ -342,7 +355,7 @@ chmod +x "$SCRIPT"
 for legacy in $LEGACY_SCRIPTS; do
   if [ -e "$TARGET/.claude/hooks/$legacy" ]; then
     rm -f "$TARGET/.claude/hooks/$legacy"
-    echo "Removed the v1 hook script .claude/hooks/$legacy (replaced by $SCRIPT_NAME)."
+    echo "Removed the 1.x hook script .claude/hooks/$legacy (replaced by $SCRIPT_NAME)."
   fi
 done
 
@@ -391,6 +404,16 @@ merge_hooks() {
       codex:SessionEnd) timeout=3 ;;
     esac
     env=$(parse_env_prefix "$(existing_command "$file" "$event")" foreign)
+    if [ "$event" = Stop ]; then
+      spine=$(spine_command "$file")
+      if [ -n "$spine" ]; then
+        spine_env=$(parse_env_prefix "$spine" all | tr ' ' '\n' | grep '^SPINE_PROMOTION_' | tr '\n' ' ')
+        case "$env$spine_env" in *SPINE_PROMOTION_THRESHOLD=*) ;; *) spine_env="${spine_env}SPINE_PROMOTION_THRESHOLD=6 " ;; esac
+        case "$env" in *SPINE_PROMOTION_*) spine_env="" ;; esac
+        env="$env$spine_env"
+        echo "Migrated the spine-promotion Stop hook into $SCRIPT_NAME (${spine_env:-settings already present})."
+      fi
+    fi
     [ -z "$env" ] || echo "Preserved environment overrides on the $event command: $env"
     # `|| true`: a missing interpreter or script exits 127 or 2, and exit 2
     # from a hook blocks the tool call or the turn. A journal hook must never.

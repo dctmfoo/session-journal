@@ -17,7 +17,7 @@ Ask at most three questions, and only when discovery cannot answer them:
 
 1. Which journal directory should be used, if root `sessions/` and `docs/sessions/` are equally plausible?
 2. Should journals be committed (the default) or ignored locally?
-3. Should the optional spine-promotion nudge be installed?
+3. Should the optional spine-promotion nudge be turned on (`SPINE_PROMOTION_THRESHOLD`)?
 
 ## Phase A — survey without writing
 
@@ -47,7 +47,7 @@ Inspect the following and record what you find for your final report:
 10. **Python.** Confirm `python3 --version` reports 3.8 or later wherever agents run.
 
 Before writing anything, ask Question 3, unless the user's request already says whether to install the optional
-spine-promotion module.
+spine-promotion nudge.
 
 ## Phase B — install and adapt
 
@@ -59,8 +59,9 @@ spine-promotion module.
    `TEMPLATE.md`. Adapt the sentinel blocks in CLAUDE.md and AGENTS.md. Keep the twin-sync sentence only when both
    files exist. A re-run of the installer preserves all of these.
 3. Add any environment prefixes from skill §2 to the generated hook commands. A re-run preserves them.
-4. If Question 3 opted into spine promotion, merge `extras/spine-promotion/journal-spine-promotion-nudge.sh` as an
-   extra Stop handler and test it. It is managed by hand, and you must also remove it by hand.
+4. If Question 3 opted into spine promotion, add `SPINE_PROMOTION_THRESHOLD=<n>` (and, if the plan directory is
+   not `docs/plans/`, `SPINE_PROMOTION_TARGET_HINT=<dir>`) to the front of the generated Stop command. A re-run of
+   the installer preserves it.
 
 Never delete or rewrite an existing user hook. Never commit unless the user asked or repository conventions already
 authorize it. Never put a real or realistic credential in a demonstration journal. If a settings file contains

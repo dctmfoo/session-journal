@@ -460,6 +460,74 @@ class Nudges(Lab):
         self.assertIn('continue it in a new journal with Continues:', out)
 
 
+class SpinePromotion(Lab):
+    """Ported from the 1.x shell extra, which judged the newest journal and blocked on every Stop."""
+
+    def detailed(self, name, milestones, pointer='none'):
+        body = JOURNAL.format(title=name, pointer=pointer).replace(
+            '- 10:00 - opened\n', ''.join(f'- milestone {i}\n' for i in range(milestones)))
+        return body
+
+    def turn(self, sid, t, name, milestones, env, pointer='none', prompt='p'):
+        t.human('work')
+        self.write_journal(sid, t, name, env=env, text=self.detailed(name, milestones, pointer))
+        self.edit(t)
+        return self.hook('Stop', sid, env=env, transcript_path=t.path, stop_hook_active=False, prompt_id=prompt)
+
+    def test_off_by_default(self):
+        t = Transcript(os.path.join(self.tmp, 's0.jsonl'))
+        self.hook('SessionStart', '5e5e0000-1', source='startup', transcript_path=t.path)
+        self.assertIsNone(self.turn('5e5e0000-1', t, '2026-01-13-0900-long.md', 9, {}))
+
+    def test_detailed_journal_at_threshold_is_asked_once(self):
+        env = {'SPINE_PROMOTION_THRESHOLD': '6'}
+        t = Transcript(os.path.join(self.tmp, 's1.jsonl'))
+        self.hook('SessionStart', '5e5e0000-2', env=env, source='startup', transcript_path=t.path)
+        self.assertIsNone(self.turn('5e5e0000-2', t, '2026-01-13-0900-long.md', 5, env, prompt='a'), 'below threshold')
+        d = self.turn('5e5e0000-2', t, '2026-01-13-0900-long.md', 6, env, prompt='b')
+        self.assertEqual(d['decision'], 'block')
+        self.assertIn('6 milestones', d['reason'])
+        self.assertIn('docs/plans/', d['reason'])
+        self.assertIsNone(self.hook('Stop', '5e5e0000-2', env=env, transcript_path=t.path, stop_hook_active=True,
+                                    prompt_id='b'))
+        self.assertIsNone(self.turn('5e5e0000-2', t, '2026-01-13-0900-long.md', 9, env, prompt='c'), 'once per journal')
+
+    def test_thin_journal_is_never_asked(self):
+        env = {'SPINE_PROMOTION_THRESHOLD': '2'}
+        t = Transcript(os.path.join(self.tmp, 's2.jsonl'))
+        self.hook('SessionStart', '5e5e0000-3', env=env, source='startup', transcript_path=t.path)
+        self.assertIsNone(self.turn('5e5e0000-3', t, '2026-01-13-0901-thin.md', 9, env, pointer='docs/plans/x.md'))
+
+    def test_judges_this_sessions_journal_not_the_newest(self):
+        env = {'SPINE_PROMOTION_THRESHOLD': '3', 'SPINE_PROMOTION_TARGET_HINT': 'specs/'}
+        p = self.jfile('2026-01-13-1000-someone-elses.md')
+        open(p, 'w').write(self.detailed('other', 20))
+        os.utime(p, (time.time() + 60,) * 2)               # the newest file belongs to nobody in this session
+        t = Transcript(os.path.join(self.tmp, 's3.jsonl'))
+        self.hook('SessionStart', '5e5e0000-4', env=env, source='startup', transcript_path=t.path)
+        self.assertIsNone(self.turn('5e5e0000-4', t, '2026-01-13-0902-mine.md', 2, env, prompt='a'))
+        d = self.turn('5e5e0000-4', t, '2026-01-13-0902-mine.md', 3, env, prompt='b')
+        self.assertIn('2026-01-13-0902-mine.md', d['reason'])
+        self.assertIn('specs/', d['reason'])
+        self.assertNotIn('someone-elses', d['reason'])
+
+    def test_title_cased_headings_are_recognised(self):
+        env = {'SPINE_PROMOTION_THRESHOLD': '3'}
+        t = Transcript(os.path.join(self.tmp, 's4.jsonl'))
+        self.hook('SessionStart', '5e5e0000-5', env=env, source='startup', transcript_path=t.path)
+        t.human('work')
+        text = self.detailed('cased', 4, pointer='docs/plans/x.md').replace('## Live plan pointer', '## Live Plan Pointer')
+        self.write_journal('5e5e0000-5', t, '2026-01-13-0903-cased.md', env=env, text=text)
+        self.edit(t)
+        self.assertIsNone(self.hook('Stop', '5e5e0000-5', env=env, transcript_path=t.path, stop_hook_active=False))
+        text = self.detailed('cased', 4).replace('## Milestones', '## MILESTONES')
+        t.human('more')
+        self.write_journal('5e5e0000-5', t, '2026-01-13-0903-cased.md', env=env, text=text)
+        self.edit(t)
+        d = self.hook('Stop', '5e5e0000-5', env=env, transcript_path=t.path, stop_hook_active=False)
+        self.assertIn('4 milestones', d['reason'])
+
+
 class Lifecycle(Lab):
     def test_session_end_pauses_and_records_session_then_reconstruct(self):
         t = Transcript(os.path.join(self.tmp, '55555555-aa.jsonl'))

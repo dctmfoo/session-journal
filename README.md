@@ -176,6 +176,8 @@ session, set it in that agent's environment.
 | `JOURNAL_MAX_KB` | `40` | Size above which an agent is told to continue in a new journal. |
 | `JOURNAL_PAUSE_ON_END` | `1` | `0`: a session ending does not mark its ACTIVE journal PAUSED. |
 | `JOURNAL_TRANSCRIPTS_DIR` | `~/.claude/projects` | Where `reconstruct` looks for transcripts. |
+| `SPINE_PROMOTION_THRESHOLD` | unset (off) | Milestone count at which a DETAILED journal is asked, once, to be promoted to a plan. |
+| `SPINE_PROMOTION_TARGET_HINT` | `docs/plans/` | Where that plan should go. |
 
 ## Safety model
 
@@ -197,10 +199,11 @@ This is a continuity aid, not a repository credential scanner. Keep your normal 
 
 ## Optional spine promotion
 
-Long-running DETAILED journals often mean a durable plan is missing. The optional module under
-`extras/spine-promotion/` nudges after a configurable number of milestones and asks the agent to promote recurring
-work into a plan. It is managed by hand: the installer does not wire it. It still judges the newest journal by
-modification time.
+Long-running DETAILED journals often mean a durable plan is missing. Set `SPINE_PROMOTION_THRESHOLD` (for example
+`6`) on the generated Stop command. When this session's own DETAILED journal reaches that many milestones, Stop asks
+once per journal for the work to be promoted into a plan under `SPINE_PROMOTION_TARGET_HINT` (default
+`docs/plans/`), and for the journal to switch to THIN. It is off by default. The 1.x shell module
+`extras/spine-promotion/` is gone: the installer removes its Stop entry and carries its settings over.
 
 ## Uninstall
 

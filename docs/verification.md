@@ -11,8 +11,8 @@ section are checked by `tests/docs.bats`, so they cannot quietly rot.
 Run these to reproduce the claim rather than trusting a number frozen here:
 
 ```bash
-bash -n install.sh doctor.sh extras/spine-promotion/*.sh
-shellcheck install.sh doctor.sh extras/spine-promotion/*.sh
+bash -n install.sh doctor.sh
+shellcheck install.sh doctor.sh
 python3 -m unittest discover -s tests -p 'test_*.py'
 bats tests
 ./doctor.sh .
@@ -20,8 +20,8 @@ bats tests
 
 | Gate | Claim |
 | --- | --- |
-| Python scenario tests | <!-- unittest-count -->53<!-- /unittest-count --> scenario methods in `tests/test_journal.py` (the session-binding class runs twice, once under `docs/sessions`), all passing |
-| bats-core | <!-- bats-count -->66<!-- /bats-count --> checks, all passing |
+| Python scenario tests | <!-- unittest-count -->58<!-- /unittest-count --> scenario methods in `tests/test_journal.py` (the session-binding class runs twice, once under `docs/sessions`), all passing |
+| bats-core | <!-- bats-count -->60<!-- /bats-count --> checks, all passing |
 | Shellcheck and `bash -n` | clean for every shell entrypoint |
 | Self-check | `./doctor.sh .` passes against this repository's own installation |
 | Secrets | the runtime guard runs over every tracked journal in CI, plus a pinned full-history gitleaks scan |

@@ -35,6 +35,8 @@ Environment (all optional):
   JOURNAL_LIVE_MIN (45)  JOURNAL_LIVE_MAX_H (24)  JOURNAL_NUDGE_MIN (20)  JOURNAL_MAX_KB (40)
   JOURNAL_PAUSE_ON_END       1 (default) marks an ACTIVE journal PAUSED when its session ends; 0 leaves it
   JOURNAL_TRANSCRIPTS_DIR    where `reconstruct` looks for transcripts (default: ~/.claude/projects)
+  SPINE_PROMOTION_THRESHOLD  opt-in: once per journal, ask to promote a DETAILED journal with this many milestones
+  SPINE_PROMOTION_TARGET_HINT  where that durable plan should go (default: docs/plans/)
 """
 from __future__ import annotations
 
@@ -1009,6 +1011,29 @@ def on_post_tool(ctx, inp):
     return None
 
 
+def spine_promotion(ctx, lease):
+    """Opt-in (SPINE_PROMOTION_THRESHOLD): once per journal, ask this session to promote a DETAILED journal that keeps
+    accumulating milestones into a durable plan. It judges the session's OWN journal, never the newest file."""
+    try:
+        threshold = int(os.environ.get('SPINE_PROMOTION_THRESHOLD') or 0)
+    except ValueError:
+        threshold = 0
+    journal = lease.get('journal')
+    if threshold <= 0 or not journal or lease.get('spine_nudged') == journal:
+        return None
+    text = read(ctx.jpath(journal))
+    if text is None or is_thin(section(text, 'Live plan pointer').split('\n')[0] if section(text, 'Live plan pointer')
+                               else 'none'):
+        return None
+    count = sum(1 for line in section(text, 'Milestones').splitlines() if re.match(r'\s*[-*] ', line))
+    if count < threshold:
+        return None
+    hint = os.environ.get('SPINE_PROMOTION_TARGET_HINT') or 'docs/plans/'
+    return (f"SESSION-JOURNAL-SPINE-PROMOTION: YOUR journal {ctx.jpath(journal)} is DETAILED and has {count} "
+            f"milestones. Promote the recurring work into a durable plan or specification under {hint}, set "
+            "'## Live plan pointer' to it, and continue in THIN mode. (Asked once per journal.)")
+
+
 def on_stop(ctx, inp):
     sid = inp.get('session_id') or 'nosid'
     pre = ctx.lease(sid) or {}
@@ -1068,9 +1093,15 @@ def on_stop(ctx, inp):
                 result = 'nudge'
                 lease['nudged'] = key
                 nudge = (lease.get('journal'), committed, lease.get('unjournaled_turns', 0), since)
+        spine = None if nudge or inp.get('stop_hook_active') or not landed or lease['role'] == 'worker' \
+            or skipping(lease) else spine_promotion(ctx, lease)
+        if spine:
+            lease['spine_nudged'] = lease['journal']
         ctx.save_lease(lease)
-    ctx.trace(ev='stop', sid=sid, result=result, why=why, journal=lease.get('journal'),
+    ctx.trace(ev='stop', sid=sid, result='spine' if spine else result, why=why, journal=lease.get('journal'),
               unjournaled=lease.get('unjournaled_turns'))
+    if spine:
+        return {'decision': 'block', 'reason': spine}
     if not nudge:
         return None
     journal, committed, unjournaled, since = nudge

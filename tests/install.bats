@@ -346,3 +346,21 @@ JSON
   run sh -c "cd '$TARGET' && printf '{}' | $stop"
   [ "$status" -eq 0 ]
 }
+
+@test "an install migrates the 1.x spine-promotion hook into the script" {
+  mkdir -p "$TARGET/.claude/hooks"
+  printf '#!/bin/bash\n' > "$TARGET/.claude/hooks/journal-spine-promotion-nudge.sh"
+  cat > "$TARGET/.claude/settings.json" <<'JSON'
+{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"SPINE_PROMOTION_TARGET_HINT=specs/ \"$(git rev-parse --show-toplevel)/.claude/hooks/journal-spine-promotion-nudge.sh\""}]}]}}
+JSON
+  run "$BATS_TEST_DIRNAME/../install.sh" "$TARGET"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Migrated the spine-promotion Stop hook"* ]]
+  [ ! -e "$TARGET/.claude/hooks/journal-spine-promotion-nudge.sh" ]
+  ! grep -q 'journal-spine-promotion-nudge' "$TARGET/.claude/settings.json"
+  jq -e '.hooks.Stop | length == 1' "$TARGET/.claude/settings.json" >/dev/null
+  jq -e '.hooks.Stop[0].hooks[0].command | startswith("SPINE_PROMOTION_TARGET_HINT=specs/ SPINE_PROMOTION_THRESHOLD=6 python3")' "$TARGET/.claude/settings.json" >/dev/null
+  run "$BATS_TEST_DIRNAME/../install.sh" "$TARGET"
+  [ "$status" -eq 0 ]
+  jq -e '.hooks.Stop[0].hooks[0].command | startswith("SPINE_PROMOTION_TARGET_HINT=specs/ SPINE_PROMOTION_THRESHOLD=6 python3")' "$TARGET/.claude/settings.json" >/dev/null
+}

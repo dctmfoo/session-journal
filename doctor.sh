@@ -84,8 +84,8 @@ for candidate_settings in "$SETTINGS" "$CODEX_SETTINGS"; do
   else
     fail "$label wires all six journal hooks" "missing:$missing (re-run ./install.sh)"
   fi
-  if [ "$HAVE_JQ" = true ] && jq -e '[.hooks // {} | .[]?[]? | .hooks[]? | .command // "" | select(test("session-journal-(pointer|nudge)\\.sh"))] | length > 0' "$candidate_settings" >/dev/null 2>&1; then
-    fail "$label carries no v1 hooks" "v1 pointer/nudge hooks still registered; re-run ./install.sh to migrate"
+  if [ "$HAVE_JQ" = true ] && jq -e '[.hooks // {} | .[]?[]? | .hooks[]? | .command // "" | select(test("session-journal-(pointer|nudge)\\.sh|journal-spine-promotion-nudge\\.sh"))] | length > 0' "$candidate_settings" >/dev/null 2>&1; then
+    fail "$label carries no v1 hooks" "1.x pointer, nudge, or spine-promotion hooks still registered; re-run ./install.sh to migrate"
   fi
 done
 [ "$RUNTIMES" -gt 0 ] || fail "a runtime is wired" "no session-journal.py hooks in .claude/settings.json or .codex/hooks.json"
@@ -100,7 +100,7 @@ elif ! VERSION_OUT=$(python3 "$SCRIPT" version 2>/dev/null); then
 else
   pass ".claude/hooks/session-journal.py runs (version $VERSION_OUT)"
 fi
-for legacy in session-journal-pointer.sh session-journal-nudge.sh; do
+for legacy in session-journal-pointer.sh session-journal-nudge.sh journal-spine-promotion-nudge.sh; do
   [ ! -e "$TARGET/.claude/hooks/$legacy" ] || note "v1 script .claude/hooks/$legacy is still on disk; ./install.sh removes it"
 done
 

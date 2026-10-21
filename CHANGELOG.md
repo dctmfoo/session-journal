@@ -71,6 +71,11 @@ sessions, and several hundred journals. Its generic findings, in the order they 
 - The `session-journal` agent skill (`skills/session-journal/`), with a Codex mirror that carries
   `agents/openai.yaml` (`codex/skills/session-journal/`). The installer places them in `.claude/skills/` and
   `.agents/skills/`. `ADOPT.md` now routes the adopting agent through the skill.
+- Spine promotion is built in and judges the session's own journal, not the newest file. Set
+  `SPINE_PROMOTION_THRESHOLD` (off by default); it asks once per journal instead of on every Stop. The 1.x shell
+  module `extras/spine-promotion/` is removed. The installer removes its Stop entry and its script from
+  `.claude/hooks/`, and carries its settings onto the generated Stop command, with a threshold of 6 when none was
+  set.
 - `--no-skill`. The doctor now checks all six events, the `|| true` safety net on each command, leftover v1 hooks,
   Python, and that local state stays out of git. It also runs the real hooks against a scratch state directory.
 - `tests/test_journal.py`: scenario tests for parallel sessions, IN USE, worktrees, `/clear`, forks, workers,

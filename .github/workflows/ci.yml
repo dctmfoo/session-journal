@@ -25,11 +25,10 @@ jobs:
         run: brew install shellcheck
       - name: Validate shell syntax
         run: |
-          bash -n extras/spine-promotion/journal-spine-promotion-nudge.sh
           bash -n install.sh
           bash -n doctor.sh
       - name: Run shellcheck
-        run: shellcheck extras/spine-promotion/*.sh install.sh doctor.sh
+        run: shellcheck install.sh doctor.sh
       - name: Run the hook scenario tests
         # The runner's python3; the script itself is also checked to parse
         # under the oldest supported interpreter's grammar (3.8).
