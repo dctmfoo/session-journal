@@ -925,6 +925,31 @@ class Secrets(Lab):
         d = self.hook('PreToolUse', 'f1f1f1f1-1', tool_name='Bash', tool_input={'command': cmd}, tool_use_id='u')
         self.assertEqual(d['hookSpecificOutput']['permissionDecision'], 'deny')
 
+    def test_a_credential_written_by_an_opaque_shell_command_is_caught_after_the_fact(self):
+        """Review finding: `F=...; cat /tmp/credential > "$F"` hides both the target and the value from PreToolUse."""
+        t = Transcript(os.path.join(self.tmp, 'o.jsonl'))
+        self.hook('SessionStart', 'f3f3f3f3-1', source='startup', transcript_path=t.path)
+        t.human('record the deploy')
+        cmd = f'F=$M/{self.jrel}/$(date +%Y)-deploy.md; cat /tmp/notes > "$F"'
+        self.assertIsNone(self.hook('PreToolUse', 'f3f3f3f3-1', tool_name='Bash', tool_input={'command': cmd},
+                                    tool_use_id='o1', transcript_path=t.path))
+        p = self.jfile('2026-01-08-2100-deploy.md', title='deploy')
+        open(p, 'a').write(self.LEAK + '\n')
+        t.tool('Bash', command=cmd)
+        d = self.hook('PostToolUse', 'f3f3f3f3-1', tool_name='Bash', tool_input={'command': cmd}, tool_use_id='o1',
+                      transcript_path=t.path)
+        note = d['hookSpecificOutput']['additionalContext']
+        self.assertIn('credential-shaped', note)
+        self.assertIn('api-key', note)
+        self.assertNotIn('live4eC', note)
+        stop = self.stop('f3f3f3f3-1', t)
+        self.assertEqual(stop['decision'], 'block')
+        self.assertIn('SESSION-JOURNAL-SECRETS', stop['reason'])
+        self.assertNotIn('live4eC', stop['reason'])
+        open(p, 'w').write(open(p).read().replace(self.LEAK, 'api_key: <redacted>'))
+        self.assertNotIn('SESSION-JOURNAL-SECRETS', json.dumps(self.stop('f3f3f3f3-1', t)))
+        self.assertEqual(self.lease('f3f3f3f3-1').get('leaked'), [])
+
     def test_warn_mode_is_advisory(self):
         env = {'JOURNAL_SECRETS': 'warn'}
         t = Transcript(os.path.join(self.tmp, 'w.jsonl'))

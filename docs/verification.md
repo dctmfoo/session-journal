@@ -20,7 +20,7 @@ bats tests
 
 | Gate | Claim |
 | --- | --- |
-| Python scenario tests | <!-- unittest-count -->60<!-- /unittest-count --> scenario methods in `tests/test_journal.py` (the session-binding class runs twice, once under `docs/sessions`), all passing |
+| Python scenario tests | <!-- unittest-count -->61<!-- /unittest-count --> scenario methods in `tests/test_journal.py` (the session-binding class runs twice, once under `docs/sessions`), all passing |
 | bats-core | <!-- bats-count -->60<!-- /bats-count --> checks, all passing |
 | Shellcheck and `bash -n` | clean for every shell entrypoint |
 | Self-check | `./doctor.sh .` passes against this repository's own installation |

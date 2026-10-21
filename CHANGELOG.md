@@ -4,6 +4,13 @@ All notable changes to this project are recorded here. Versions follow
 [semantic versioning](https://semver.org/): the public surface is the journal
 shape, the hook contract, the installer flags, and the environment variables.
 
+## 2.0.1
+
+- **A credential written by an opaque shell command is caught.** `F=<journal>; cat notes > "$F"` hides the target
+  and the value from `PreToolUse`. After a shell command changes a journal, `PostToolUse` now scans the journal file
+  itself and tells the agent to remove what matched; in `deny` mode, Stop blocks until the journal is clean. Values
+  are never echoed. Found by an automated review of the 2.0.0 pull request.
+
 ## 2.0.0
 
 Session-bound journals. 1.x asked "which journal is newest?" at every session start and every turn end. With more
