@@ -4,6 +4,84 @@ All notable changes to this project are recorded here. Versions follow
 [semantic versioning](https://semver.org/): the public surface is the journal
 shape, the hook contract, the installer flags, and the environment variables.
 
+## 2.0.0
+
+Session-bound journals. 1.x asked "which journal is newest?" at every session start and every turn end. With more
+than one agent session in a repository (parallel chats, worktrees, a lead dispatching workers), the newest journal
+is usually someone else's. 2.0 asks "which journal is *this* session's?" instead.
+
+The changes follow a field audit of a long-running private deployment of this discipline: about a thousand
+sessions, and several hundred journals. Its generic findings, in the order they drove the design:
+
+- **The start pointer named the wrong journal.** In the busiest period, the newest-journal pointer was irrelevant to
+  the prompt in roughly half of all sessions, and agents opened it less every month.
+- **Parallel sessions polluted each other.** A fresher journal from another session silenced this session's nudge,
+  or redirected it. About one in eight reminders named another session's journal. Agents appended unrelated work
+  into journals that other live sessions were writing.
+- **Size followed writer count.** Journals with one writer stayed small. Journals with many writers grew past
+  tens of kilobytes and mixed workstreams.
+- **Nudges arrived where they did not belong.** They fired on read-only turns, looped on long coordinator sessions,
+  and reached dispatched workers that correctly had no journal. A leaked loop marker silenced the turn after every
+  nudge.
+- **Linked worktrees** wrote journals into their own stale copy of the journal directory.
+- **Shell and Python journal writes** were invisible to a check based on editing tools.
+- **A background job** that touched a journal took over the pointer.
+
+### Behaviour changes (why this is a major version)
+
+- **One Python 3 script replaces both shell hooks.** It handles six events (`SessionStart`, `UserPromptSubmit`,
+  `PreToolUse`, `PostToolUse`, `Stop`, `SessionEnd`) and a CLI. It uses the standard library only and needs
+  Python 3.8 or later. `jq` is still needed by the installer only.
+- **SessionStart no longer injects the newest journal.** It names the journal this session is bound to. With no
+  binding, it lists up to five ranked open candidates, with IN USE marked. On the first prompt it adds up to two
+  journals whose name or title matches.
+- **Stop checks this session's own journal, from this turn's facts.** It no longer compares file modification
+  times. It nudges at most once per turn, and only when the turn landed work. Freshness windows are gone.
+- **Writes into a journal another live session owns are denied.** So are writes into a linked worktree's copy of
+  the journal directory.
+- **The credential check moved from Stop to PreToolUse.** The write is denied before it reaches disk, and no Stop
+  loop is needed. The rules are retuned for compound key names (`dbPassword=`, `SERVICE_API_KEY:`), prose, table
+  cells, URL credentials, and CLI flags. The bare-hexadecimal rule is gone.
+- **Sessions end by marking an ACTIVE journal PAUSED**, and record themselves on a `**Sessions:**` line. `PAUSED`
+  joins the status vocabulary. `JOURNAL_PAUSE_ON_END=0` turns this off.
+- **`SESSION_JOURNAL_DIR` is relative to the main checkout.** The installer rewrites the v1 absolute form.
+
+### Removed
+
+- `hooks/session-journal-pointer.sh` and `hooks/session-journal-nudge.sh`. The installer removes them, and their hook
+  groups, from adopted repositories.
+- `JOURNAL_FRESH_SECS`, `JOURNAL_REQUIRE_CONTENT_CHANGE`, and `JOURNAL_STOP_MARKER_TTL_SECS`. A re-install drops
+  them from the generated commands.
+
+### Added
+
+- Session leases in `.claude/state/session-journal/`, which ignores itself.
+- Main-checkout resolution for linked worktrees. A pooled worktree whose directory is named after the repository is
+  labelled by its branch.
+- `/clear` handling: the window's previous journal is offered first. A fork never inherits its parent's journal.
+- Roles. `JOURNAL_ROLE=worker` sessions are never nudged and their journal writes are denied. `JOURNAL_WORKER_PROMPT`
+  makes soft workers from a configurable first-prompt pattern. A worker ledger shows landed worker results to the
+  lead once.
+- A size limit (`JOURNAL_MAX_KB`, default 40) that tells the agent to continue in a new journal with
+  `**Continues:**`.
+- The CLI: `candidates`, `find`, `reconstruct`, `list`, `health`, `scan`, `sweep [--by-git]`, `whoami`, `bound`,
+  `bind`, `release`, `role`, `skip`, and `version`.
+- Codex support for every event. `apply_patch` edits are read from `tool_input.command`, Codex turns are keyed by
+  `turn_id`, and a Stop hook always prints JSON, as Codex requires.
+- The `session-journal` agent skill (`skills/session-journal/`), with a Codex mirror that carries
+  `agents/openai.yaml` (`codex/skills/session-journal/`). The installer places them in `.claude/skills/` and
+  `.agents/skills/`. `ADOPT.md` now routes the adopting agent through the skill.
+- `--no-skill`. The doctor now checks all six events, the `|| true` safety net on each command, leftover v1 hooks,
+  Python, and that local state stays out of git. It also runs the real hooks against a scratch state directory.
+- `tests/test_journal.py`: scenario tests for parallel sessions, IN USE, worktrees, `/clear`, forks, workers,
+  debouncing, THIN nudges, credentials, Codex-shaped input, sweep, and a custom journal directory.
+
+### Upgrade notes
+
+Re-run `./install.sh <repo>` from a fresh clone, with the flags you installed with, then run `./doctor.sh <repo>`
+and commit. Journals are not renamed or rewritten. The adapted README, TEMPLATE, and instruction blocks are kept.
+Pass `--refresh-docs` to pick up the 2.0 wording for them, which describes candidates and IN USE.
+
 ## 1.1.0
 
 The first release that treats the discipline as something people *operate*

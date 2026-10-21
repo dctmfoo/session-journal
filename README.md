@@ -1,19 +1,31 @@
 # Session Journal
 
-Give coding agents a memory between sessions: one small journal, a start hook that points to it, and a stop hook that keeps it current.
+Give coding agents a memory between sessions. Each piece of work gets one small journal, and each journal is bound
+to the session that writes it. Parallel sessions, worktrees, and lead/worker setups therefore stop reading, and
+writing into, each other's journals.
 
-This pattern was hardened over months in private enterprise-delivery repositories, then rewritten as a clean, standalone project. It supports Claude Code and Codex with the same portable shell hooks, and it remains useful as an instruction-only discipline in other agent runtimes.
+It supports Claude Code and Codex with one dependency-free Python 3 script. In other agent runtimes it works as an
+instruction-only discipline.
 
 ## What you get
 
-- A fixed journal shape optimized for a fresh agent's first minute.
-- THIN mode for work governed by a plan, and DETAILED mode for one-off work.
-- `SessionStart` context containing the live journal, its status, and complete next step.
-- A one-shot `Stop` nudge for missing or stale journals.
-- A secrets guard that blocks common credential shapes without printing values.
-- A re-runnable `doctor.sh` self-check, because a hook that stops firing is silent.
-- An agent-led adoption contract that surveys and adapts to the target repository.
-- A deterministic, idempotent installer and uninstall path.
+- **A fixed journal shape**, built for a fresh agent's first minute. THIN mode is for work a plan governs; DETAILED
+  mode is for one-off work.
+- **Session binding.** A journal belongs to the session that first writes it. At start, a session is told the
+  journal it is bound to. With no binding, it gets ranked candidates instead of "the newest file".
+- **IN USE protection.** Writes into a journal that another live session owns are denied. The agent is told to
+  start its own journal with a `**Continues:**` link.
+- **Quiet nudges.** Stop asks for an update only when the turn landed work (an edit or a commit) and did not touch
+  this session's journal, and at most once per turn. Read-only turns are never nudged.
+- **Worktrees, `/clear`, and forks.** Journals stay in the main checkout. `/clear` offers the window's previous
+  journal. A fork never inherits its parent's journal.
+- **Lead and worker roles.** Workers write no journals. Their landed results reach the lead.
+- **A credential check.** A journal write that looks like it carries a credential is denied, and the denial never
+  shows the value.
+- **A CLI** for continuity work: `candidates`, `find`, `reconstruct`, `list`, `health`, `scan`, `sweep`.
+- **An agent skill** for the judgment calls the scripts cannot make: adopting, adapting, roles, migration, recall.
+- **A doctor and an installer.** `doctor.sh` re-checks an installation at any time. The installer is idempotent,
+  migrates v1 in place, and uninstalls cleanly.
 
 ## 60-second agent install
 
@@ -21,7 +33,9 @@ In your repository, tell your agent:
 
 > Read https://github.com/dctmfoo/session-journal/blob/main/ADOPT.md and install the session-journal discipline in this repo, adapted to how this repo works. Ask me only the questions ADOPT.md tells you to ask.
 
-The contract makes the agent inspect your runtimes, instruction files, hooks, docs topology, timezone, ignore rules, and monorepo shape before it writes anything. It must merge rather than clobber and report a behavioral verification matrix.
+`ADOPT.md` sends the agent through the `session-journal` skill (`skills/session-journal/SKILL.md`). The agent
+surveys the repository's runtimes, instruction files, documentation, worktree habits, and ignore rules, runs the
+installer, adapts the generated docs, and reports what the doctor printed.
 
 For offline use:
 
@@ -29,7 +43,8 @@ For offline use:
 npx degit dctmfoo/session-journal session-journal-source
 ```
 
-Then point your agent at the local `ADOPT.md`. Pin a release tag rather than tracking `main` if you want a reproducible install.
+Then point your agent at the local `ADOPT.md`. Pin a release tag rather than tracking `main` if you want a
+reproducible install.
 
 ## Deterministic install
 
@@ -42,17 +57,51 @@ Run from a clone; the installer does not fetch code:
 | Option | Effect |
 | --- | --- |
 | `--sessions-dir <path>` | Journal directory, relative to the target repo. Default `sessions`. |
-| `--plan-pointer <value>` | Default `## Live plan pointer` for the generated docs. Default `none` (DETAILED). Give it a path to start in THIN mode. |
-| `--codex` | Also install Codex hooks and the `AGENTS.md` block. |
-| `--no-claude` | Skip the Claude Code hooks and the `CLAUDE.md` block. |
+| `--plan-pointer <value>` | Default `## Live plan pointer` for the generated docs. Default `none` (DETAILED). |
+| `--codex` | Also install Codex hooks, the Codex skill (`.agents/skills/`), and the `AGENTS.md` block. |
+| `--no-claude` | Skip the Claude Code hooks, the Claude skill, and the `CLAUDE.md` block. |
+| `--no-skill` | Do not install the agent skill. |
 | `--refresh-docs` | Regenerate the sessions README, `TEMPLATE.md`, and instruction blocks, discarding local adaptations. |
-| `--uninstall` | Remove the owned hooks, scripts, and instruction blocks. |
+| `--uninstall` | Remove the owned hooks, script, skills, local state, and instruction blocks. |
 
-`jq` is required because settings are merged structurally. Invalid JSON or JSON5 is refused rather than rewritten. Every refusal happens before the first byte is written, so a refused install never leaves hooks half-wired.
+The installer needs `jq` because it merges settings structurally. It refuses invalid JSON or JSON5 rather than
+rewriting it. Every refusal happens before the first byte is written. Agents need `python3` 3.8 or later. Every hook
+command ends in `|| true`, so a missing interpreter disables the hooks instead of blocking the agent.
 
-Then commit the result. `.claude/` and the journal directory are what carry the discipline to your teammates; an install that only exists on your machine is not adopted.
+What it writes:
 
-Codex project hooks load only for trusted projects. After installation, open `/hooks` in Codex and review the new definitions; changed definitions require review again. Codex CLI 0.144.1 was verified with both `SessionStart` and turn-scoped `Stop`, so the same pointer, freshness nudge, and secrets guard run in Codex. The AGENTS.md block keeps a manual fallback for older or disabled hook surfaces.
+- `.claude/hooks/session-journal.py`: the single hook script.
+- Six hook groups per runtime: `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Stop`, and
+  `SessionEnd`.
+- `<sessions>/README.md` and `<sessions>/TEMPLATE.md`.
+- The skill.
+- A sentinel-delimited block in `CLAUDE.md` and/or `AGENTS.md`.
+
+Leases and traces live in `.claude/state/session-journal/`, which ignores itself.
+
+Then commit the result. `.claude/`, `.codex/`, `.agents/`, and the journal directory carry the discipline to your
+teammates. An install that exists only on your machine is not adopted.
+
+Codex loads project hooks only for trusted projects. After installation, open `/hooks` in Codex and review the new
+definitions.
+
+## Upgrading from 1.x
+
+```bash
+./install.sh /path/to/your-repo          # same flags you installed with
+./doctor.sh /path/to/your-repo
+```
+
+The installer does the following:
+
+- Removes the v1 `session-journal-pointer.sh` and `session-journal-nudge.sh` scripts and their hook groups, and
+  wires the new script.
+- Keeps your journal directory, rewriting it as a relative `SESSION_JOURNAL_DIR` so linked worktrees resolve it to
+  the main checkout.
+- Keeps your adapted README, TEMPLATE, and instruction blocks.
+- Drops the v1-only freshness variables.
+
+No journal is renamed or rewritten. See [CHANGELOG.md](CHANGELOG.md) for what behaves differently.
 
 ## Check the installation
 
@@ -60,22 +109,24 @@ Codex project hooks load only for trusted projects. After installation, open `/h
 ./doctor.sh /path/to/your-repo
 ```
 
-Every failure mode in this project is silent by construction: a `SessionStart` hook that never fires looks exactly like a session with no journal, and a `Stop` hook that never fires looks exactly like a journal that is always fresh. The doctor re-runs the adoption verification matrix at any time, and checks what adoption cannot: whether the installation is committed, whether a teammate will actually receive it, whether the registered command still resolves, and which journal the pointer would deliver right now. It exits non-zero if anything fails, so it works in CI.
+Every failure mode here is silent by construction. A hook that never fires looks exactly like a quiet session. The
+doctor checks that:
 
-## Updating
+- the wiring is complete, and every command has its `|| true` safety net;
+- no v1 hooks remain;
+- Python is available and the installed script runs;
+- the installation is committed and not ignored;
+- local state stays out of git.
 
-Re-run the installer from a fresh clone:
-
-```bash
-./install.sh /path/to/your-repo
-```
-
-The rerun preserves your adapted `sessions/README.md`, your `TEMPLATE.md`, your instruction block, and any environment overrides on the generated commands, printing a line for each thing it keeps. Pass `--refresh-docs` when you want the upstream wording back. Check [CHANGELOG.md](CHANGELOG.md) for upgrade notes, then run `./doctor.sh`.
+It then runs the real `SessionStart` and `Stop` hooks against a scratch state directory, scans every journal for
+credential shapes, and reports hook errors logged on this machine. It exits non-zero on any failure, so it works in
+CI.
 
 ## The journal in one glance
 
 ```markdown
 **Status:** ACTIVE — installer tests are green
+**Continues:** sessions/2026-03-02-0915-release-prep.md
 
 ## Live plan pointer
 docs/plans/release.md
@@ -84,33 +135,72 @@ docs/plans/release.md
 Run the packaging check, then record the artifact hash here.
 ```
 
-The pointer makes this THIN mode: details stay in the release plan. With `none`, the journal becomes DETAILED and carries the working record itself. See [the full specification](spec/session-journal-spec.md) and [template](templates/session-journal.md).
+The pointer makes this THIN mode: the details stay in the release plan. With `none`, the journal is DETAILED and
+carries the working record itself. See [the specification](spec/session-journal-spec.md) and
+[the template](templates/session-journal.md).
 
-Set `**Status:** DONE` when the work is finished. A DONE journal is background, not the live frontier — the next session starts clean instead of inheriting a completed next step.
+## The CLI
+
+```bash
+python3 .claude/hooks/session-journal.py candidates [words]   # bound journal, then open candidates (IN USE marked)
+python3 .claude/hooks/session-journal.py find <words>         # search journals and the worker ledger
+python3 .claude/hooks/session-journal.py reconstruct <journal> # next step, sessions that wrote it, Continues chain
+python3 .claude/hooks/session-journal.py list [--all]         # sessions and their journals
+python3 .claude/hooks/session-journal.py health               # drift indicators (JSON)
+python3 .claude/hooks/session-journal.py scan [files]         # credential shapes; line numbers only
+python3 .claude/hooks/session-journal.py sweep [hours] [--by-git] [--dry-run]   # pause idle ACTIVE journals
+python3 .claude/hooks/session-journal.py role lead|worker | skip | release <sid> | bind <journal>
+```
+
+The session id defaults to `$CLAUDE_CODE_SESSION_ID` (Claude Code) or `$CODEX_THREAD_ID` (Codex); set `SESSION_JOURNAL_SESSION_ID` to override it.
 
 ## Configuration
 
-Every setting is an environment variable on the generated hook command, so it lives in your settings file and travels with the repository.
+Every setting is an environment variable. To make one apply to everyone, put it at the front of the generated hook
+commands, where it travels with the repository; a re-run of the installer keeps it. To scope one to a single
+session, set it in that agent's environment.
 
 | Variable | Default | Effect |
 | --- | --- | --- |
-| `SESSION_JOURNAL_DIR` | `<repo>/sessions` | Journal directory. Set by `--sessions-dir`. |
-| `JOURNAL_FRESH_SECS` | `300` | How old the newest journal may be before `Stop` nudges. |
-| `SESSION_JOURNAL_SKIP` | unset | Set to `1` for a session that genuinely needs no journal — a typo fix, a dependency bump. The secrets guard still runs. |
-| `JOURNAL_REQUIRE_CONTENT_CHANGE` | `1` | Require the journal's content to have changed when tracked files did, not just its timestamp. Set to `0` for mtime-only freshness. |
-| `JOURNAL_STOP_MARKER_TTL_SECS` | `60` | How long the one-shot loop marker stays valid, for runners that supply no stdin. |
+| `SESSION_JOURNAL_DIR` | `sessions` | Journal directory, relative to the main checkout. Set by `--sessions-dir`. |
+| `SESSION_JOURNAL_STATE_DIR` | `.claude/state/session-journal` | Leases, ledger, and trace. |
+| `SESSION_JOURNAL_SKIP` | unset | `1`: never nudge this session (a typo fix, a dependency bump). The credential check still runs. |
+| `SESSION_JOURNAL_DISABLE` | unset | `1`: every hook does nothing. |
+| `JOURNAL_ROLE` | `lead` | `worker`: never nudged; journal writes denied. |
+| `JOURNAL_WORKER_PROMPT` | unset | Regex. A session whose first prompt matches is a soft worker: never nudged, writes allowed. |
+| `JOURNAL_LANDING_BASH` | unset | Regex. Extra shell commands that count as landed work. `git commit` and `git push` always count. |
+| `JOURNAL_SECRETS` | `deny` | `warn` turns the credential check into advice; `off` disables it. |
+| `JOURNAL_LIVE_MIN` | `45` | Minutes a silent session still holds its journal. A running agent process holds it longer. |
+| `JOURNAL_LIVE_MAX_H` | `24` | Cap on the process-alive hold. |
+| `JOURNAL_NUDGE_MIN` | `20` | Minutes after which a landed turn is nudged even without a commit. |
+| `JOURNAL_MAX_KB` | `40` | Size above which an agent is told to continue in a new journal. |
+| `JOURNAL_PAUSE_ON_END` | `1` | `0`: a session ending does not mark its ACTIVE journal PAUSED. |
+| `JOURNAL_TRANSCRIPTS_DIR` | `~/.claude/projects` | Where `reconstruct` looks for transcripts. |
 
 ## Safety model
 
-Journals are committed by default, so secret handling is deliberately strict. The Stop hook scans only the newest journal for JWT-like values, bearer values, credential assignments, provider-token shapes, private-key headers, and long hexadecimal strings. It reports line numbers, never matched values.
+Journals are committed by default, so credential handling is strict. `PreToolUse` scans the new text of every
+journal write, whether it comes from an edit, `apply_patch`, or a shell write. It looks for:
 
-Self-identifying shapes are always flagged. For a `key: value` assignment the *value* is inspected, not just the key name, so the redactions this guard asks for — `<redacted>`, `$STRIPE_API_KEY`, `redacted (32 chars)`, `stored-in-ci-secrets` — are accepted rather than blocking the agent in a redact-and-reblock loop. Quotes, backticks and markdown emphasis are stripped before that check, so `PASSWORD="…"` and a backticked value are still caught, and every credential key on a line is examined rather than only the first. A bare hexadecimal string is flagged only away from digest context: if the line, the line above, or the line below mentions a digest, hash, checksum, fingerprint, commit, revision, blob, oid, or etag *as a whole word*, the value is treated as verifiable evidence and left alone. A remaining false positive can carry `<!-- journal-secrets-ok -->`, and that escape applies only to its own line.
+- provider token shapes, JWTs, bearer values, and private-key headers;
+- storage keys and signed URLs;
+- credentials embedded in URLs;
+- `key: value` assignments whose key names a secret;
+- passwords stated in prose or in table cells.
 
-This is a continuity aid, not a credential scanner for the whole repository. Keep your normal secret-scanning and review gates. See [SECURITY.md](SECURITY.md).
+For named keys the *value* is inspected. The redactions the check asks for therefore pass: `<redacted>`,
+`$API_TOKEN`, `stored-in-ci-secrets`, `redacted (32 chars)`. So do identifiers and references. The denial names
+lines and rules, never values. `<!-- journal-secrets-ok -->` exempts a line a human has verified.
+
+This is a continuity aid, not a repository credential scanner. Keep your normal secret-scanning gates. See
+[SECURITY.md](SECURITY.md).
 
 ## Optional spine promotion
 
-Long-running DETAILED journals often mean a durable plan is missing. The optional module under `extras/spine-promotion/` nudges after a configurable milestone count, then asks the agent to promote recurring work into a plan or specification and switch back to THIN. It is an intentionally manual add-on: the core installer and uninstaller do not manage its Stop entry.
+Long-running DETAILED journals often mean a durable plan is missing. The optional module under
+`extras/spine-promotion/` nudges after a configurable number of milestones and asks the agent to promote recurring
+work into a plan. It is managed by hand: the installer does not wire it. It still judges the newest journal by
+modification time.
 
 ## Uninstall
 
@@ -118,37 +208,49 @@ Long-running DETAILED journals often mean a durable plan is missing. The optiona
 ./install.sh /path/to/your-repo --codex --uninstall
 ```
 
-The installer removes only its hook groups, scripts, and sentinel-delimited instruction blocks. It keeps journals, their README, and `TEMPLATE.md` because they are project history.
+This removes the owned hook groups (v1 and v2), the script, the skills, local state, and the instruction blocks. It
+keeps journals, their README, and `TEMPLATE.md`, because they are project history.
 
 ## Troubleshooting
 
-Indexed by what you actually observe.
+**The agent says nothing about journals at start.** `SessionStart` is not firing. Run `./doctor.sh`. Likely causes:
 
-**The agent starts a session and says nothing about a journal.** The `SessionStart` hook is not firing. Run `./doctor.sh` — the likely causes are an uncommitted or gitignored `.claude/`, an install into a subdirectory rather than the repository root, or a hook script that lost its executable bit.
+- an uncommitted or ignored `.claude/`;
+- no `python3` on the agent's `PATH`;
+- a missing journal directory (the hooks never create it).
 
-**The agent was handed an old journal.** Fixed in 1.1.0: selection used to be decided by mtime alone, and a fresh clone gives every journal the same timestamp, which kept the alphabetically oldest one. Upgrade, then confirm with `./doctor.sh`, which reports which journal the pointer would deliver.
+**The agent appended to someone else's journal.** It wrote before the other session bound it, or the other session
+had been silent for more than `JOURNAL_LIVE_MIN` with no running process. Check with
+`python3 .claude/hooks/session-journal.py list --all`.
 
-**A fresh agent is told there is no work left.** The newest journal is `DONE`. Since 1.1.0 the pointer prefers the newest `ACTIVE` or `BLOCKED` journal and, when every journal is closed, says so rather than replaying a finished next step.
+**A write was denied as IN USE, but that session is gone.** Run
+`python3 .claude/hooks/session-journal.py release <sid>`.
 
-**`Stop` keeps blocking no matter what the agent writes.** The secrets guard is matching something. It runs ahead of the loop protection by design, so `stop_hook_active` will not clear it. The message names the line numbers; redact the value to a key name, an env-var reference, or `<redacted>`. If the line is a verified false positive, append `<!-- journal-secrets-ok -->` to it.
+**A write was denied for a credential that is not one.** Redact the value to a reference. If a human confirms the
+line is clean, append `<!-- journal-secrets-ok -->`.
 
-**`Stop` nudges even though the journal was just updated.** Since 1.1.0 the gate requires content to change, not just the timestamp, when *tracked* files changed. Untracked scratch files are ignored, and a journal committed alongside its work counts as recorded. If it still misfires for your workflow, set `JOURNAL_REQUIRE_CONTENT_CHANGE=0`.
+**Workers keep getting nudged.** Start them with `JOURNAL_ROLE=worker`, or set `JOURNAL_WORKER_PROMPT` to match your
+orchestrator's dispatch prompt.
 
-**Every trivial session demands a journal.** Set `SESSION_JOURNAL_SKIP=1` for that session.
+**A trivial session demands a journal.** Run `python3 .claude/hooks/session-journal.py skip`, or start the agent
+with `SESSION_JOURNAL_SKIP=1`.
 
-**A teammate cloned the repo and none of this works for them.** `.claude/` is probably gitignored or was never committed. `./doctor.sh` reports this explicitly.
+**A teammate cloned the repo and none of this works for them.** `.claude/` is probably ignored or uncommitted.
+`./doctor.sh` reports it.
 
 ## FAQ
 
-**Why not use conversation history?** A journal is runtime-neutral, reviewable in git, and written around current state and next action rather than transcript chronology.
+**Why not use conversation history?** A journal is runtime-neutral, reviewable in git, and written around current
+state and next action rather than transcript order.
 
-**One journal per agent?** No. One per substantive human working session. A monorepo usually keeps one journal directory at its workspace root.
+**One journal per agent?** One per piece of work, owned by one live session at a time. Workers report to a lead,
+whose journal records the outcome.
 
-**Does Stop block forever?** No. Hook JSON uses `stop_hook_active`; empty-stdin runners get a short-lived marker fallback. The secrets guard still runs after the freshness nudge has been spent, and it is the one thing that can block repeatedly — deliberately, because the alternative is committing a credential.
+**Why is there a state directory now?** Binding needs to know which session wrote what. The state is small JSON,
+local to the machine, and ignores itself. Losing it costs live IN USE locks, never journal content.
 
-**Can journals be local-only?** Yes. The default is committed continuity, but ADOPT.md explicitly asks when ignore intent is ambiguous. `./doctor.sh` will tell you which you have.
-
-**Why is there no database?** Because the journal is the compression. It is written by an agent, read by a human, reviewed in a pull request, and carried by git. A store would add a runtime, a migration story, and a corruption story to a project whose entire value is that it has none of those.
+**Why Python instead of shell?** Six events, transcript parsing, locking, and a CLI did not fit in portable shell.
+The script uses the standard library only, and runs with Python 3.8 or later.
 
 ## License
 

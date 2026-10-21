@@ -11,20 +11,35 @@ section are checked by `tests/docs.bats`, so they cannot quietly rot.
 Run these to reproduce the claim rather than trusting a number frozen here:
 
 ```bash
-bash -n hooks/*.sh install.sh doctor.sh extras/spine-promotion/*.sh
-shellcheck hooks/*.sh install.sh doctor.sh extras/spine-promotion/*.sh
+bash -n install.sh doctor.sh extras/spine-promotion/*.sh
+shellcheck install.sh doctor.sh extras/spine-promotion/*.sh
+python3 -m unittest discover -s tests -p 'test_*.py'
 bats tests
 ./doctor.sh .
 ```
 
 | Gate | Claim |
 | --- | --- |
-| bats-core | <!-- bats-count -->123<!-- /bats-count --> checks, all passing |
+| Python scenario tests | <!-- unittest-count -->53<!-- /unittest-count --> scenario methods in `tests/test_journal.py` (the session-binding class runs twice, once under `docs/sessions`), all passing |
+| bats-core | <!-- bats-count -->66<!-- /bats-count --> checks, all passing |
 | Shellcheck and `bash -n` | clean for every shell entrypoint |
 | Self-check | `./doctor.sh .` passes against this repository's own installation |
 | Secrets | the runtime guard runs over every tracked journal in CI, plus a pinned full-history gitleaks scan |
 
-## Adoption record — 2026-07-13, macOS
+## 2.0.0 record — 2026-10-21, macOS
+
+A snapshot, never rewritten. Python 3.14 and Claude Code 2.1.306 / Codex CLI 0.163.0 were installed on the machine.
+
+- The scenario suite and the bats suite passed at the revision that introduced 2.0.0. Re-run the commands under
+  **Current gates** for today's counts.
+- The installer ran twice into a fresh scratch repository under `/tmp` (with and without `--codex`), then into a
+  scratch v1 installation, which it migrated. `./doctor.sh` passed on each.
+- Simulated sessions piped hook JSON into the installed script: start, edit, commit, Stop nudge, journal write,
+  Stop quiet, SessionEnd.
+- Live Claude Code and Codex sessions against 2.0 were **not** exercised in this record; the hook input and output
+  shapes were checked against each runtime's published hook reference.
+
+## Adoption record — 2026-07-13, macOS (1.0, shell hooks)
 
 ## Automated suites
 
